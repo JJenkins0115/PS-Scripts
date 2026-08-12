@@ -513,71 +513,95 @@ function New-InfoLabel {
 function Add-Section {
 
     param(
-
         [System.Windows.Forms.FlowLayoutPanel]$Parent,
-
         [string]$Title,
-
         [string]$Content
-
     )
+
+    # --------------------------------------------------------
+    # Container
+    # --------------------------------------------------------
 
     $Panel = New-Object System.Windows.Forms.Panel
 
     $Panel.Width = 760
-
     $Panel.Height = 48
 
-    $Panel.BackColor = $ColorWhite
+    $Panel.Margin = New-Object System.Windows.Forms.Padding(
+        0,
+        0,
+        0,
+        8
+    )
+
+    $Panel.BackColor = [System.Drawing.Color]::White
+
+    # --------------------------------------------------------
+    # Button
+    # --------------------------------------------------------
 
     $Button = New-Object System.Windows.Forms.Button
 
-    $Button.Text = "▶  $Title"
+    $Button.Text = "+  $Title"
 
     $Button.Width = 740
-
     $Button.Height = 42
 
-    $Button.Location = New-Object `
-        System.Drawing.Point(10,3)
+    $Button.Location = New-Object System.Drawing.Point(
+        10,
+        3
+    )
 
     $Button.FlatStyle = "Flat"
 
     $Button.FlatAppearance.BorderSize = 0
 
-    $Button.BackColor = $ColorWhite
+    $Button.BackColor = [System.Drawing.Color]::White
 
-    $Button.ForeColor = $ColorText
+    $Button.ForeColor = [System.Drawing.Color]::FromArgb(
+        30,
+        41,
+        59
+    )
 
-    $Button.Font = New-Object `
-        System.Drawing.Font(
-            "Segoe UI Semibold",
-            10
-        )
+    $Button.Font = New-Object System.Drawing.Font(
+        "Segoe UI Semibold",
+        10
+    )
 
     $Button.TextAlign = "MiddleLeft"
 
-    $TextBox = New-Object `
-        System.Windows.Forms.RichTextBox
+    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
+
+    # --------------------------------------------------------
+    # Content
+    # --------------------------------------------------------
+
+    $TextBox = New-Object System.Windows.Forms.RichTextBox
 
     $TextBox.Text = $Content
 
     $TextBox.ReadOnly = $true
 
-    $TextBox.BackColor = $ColorWhite
+    $TextBox.BackColor = [System.Drawing.Color]::White
 
-    $TextBox.ForeColor = $ColorText
+    $TextBox.ForeColor = [System.Drawing.Color]::FromArgb(
+        30,
+        41,
+        59
+    )
 
     $TextBox.BorderStyle = "None"
 
-    $TextBox.Font = New-Object `
-        System.Drawing.Font(
-            "Consolas",
-            9
-        )
+    $TextBox.Font = New-Object System.Drawing.Font(
+        "Consolas",
+        9
+    )
 
-    $TextBox.Location = New-Object `
-        System.Drawing.Point(20,48)
+    $TextBox.Location = New-Object System.Drawing.Point(
+        20,
+        48
+    )
 
     $TextBox.Width = 720
 
@@ -585,54 +609,73 @@ function Add-Section {
 
     $TextBox.Visible = $false
 
-    $TextBox.Anchor = `
-        [System.Windows.Forms.AnchorStyles]::Top `
-        -bor [System.Windows.Forms.AnchorStyles]::Left `
-        -bor [System.Windows.Forms.AnchorStyles]::Right
+    # --------------------------------------------------------
+    # Add Controls
+    # --------------------------------------------------------
 
     $Panel.Controls.Add($Button)
 
     $Panel.Controls.Add($TextBox)
 
+    # --------------------------------------------------------
+    # Click Event
+    # --------------------------------------------------------
+
     $Button.Add_Click({
 
-        if ($TextBox.Visible) {
+        if ($TextBox.Visible -eq $false) {
+
+            # ================================================
+            # OPEN
+            # ================================================
+
+            $TextBox.Visible = $true
+
+            $LineCount = ($TextBox.Text -split "`r?`n").Count
+
+            $ContentHeight = ($LineCount * 18) + 25
+
+            if ($ContentHeight -lt 80) {
+
+                $ContentHeight = 80
+            }
+
+            if ($ContentHeight -gt 400) {
+
+                $ContentHeight = 400
+            }
+
+            $TextBox.Height = $ContentHeight
+
+            $Panel.Height = $ContentHeight + 55
+
+            $Button.Text = "-  $Title"
+
+        }
+        else {
+
+            # ================================================
+            # CLOSE
+            # ================================================
 
             $TextBox.Visible = $false
 
             $Panel.Height = 48
 
-            $Button.Text = "▶  $Title"
-
-        }
-        else {
-
-            $TextBox.Visible = $true
-
-            $LineCount = ($Content -split "`r?`n").Count
-
-            $Height = [Math]::Min(
-                400,
-                [Math]::Max(
-                    80,
-                    ($LineCount * 18) + 20
-                )
-            )
-
-            $TextBox.Height = $Height
-
-            $Panel.Height = $Height + 55
-
-            $Button.Text = "▼  $Title"
+            $Button.Text = "+  $Title"
         }
 
         $Parent.PerformLayout()
 
+        $Parent.Refresh()
     })
+
+    # --------------------------------------------------------
+    # Add To Main Panel
+    # --------------------------------------------------------
 
     $Parent.Controls.Add($Panel)
 }
-
 # ============================================================
 # MAIN WINDOW
 # ============================================================
