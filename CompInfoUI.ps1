@@ -1,8 +1,52 @@
 # ============================================================
 # COMPUTER INFORMATION GUI
 # ============================================================
+
+[CmdletBinding()]
+param()
+
+# ============================================================
+# HIDE POWERSHELL CONSOLE
+# ============================================================
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class ConsoleWindow {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(
+        IntPtr hWnd,
+        int nCmdShow
+    );
+}
+"@
+
+$ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
+
+if ($ConsoleHandle -ne [IntPtr]::Zero) {
+
+    [ConsoleWindow]::ShowWindow(
+        $ConsoleHandle,
+        0
+    )
+}
+
+# ============================================================
+# LOAD WINDOWS FORMS
+# ============================================================
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+[System.Windows.Forms.Application]::EnableVisualStyles()
+
+$ErrorActionPreference = "SilentlyContinue"
+
 # Standalone PowerShell GUI
-# Does NOT interact with AppCleanup.ps1
 #
 # Requires:
 #   Windows PowerShell 5.1+
