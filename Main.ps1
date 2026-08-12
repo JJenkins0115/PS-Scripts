@@ -6,7 +6,6 @@ $GitHubUser = "JJenkins0115"
 $Repository = "PS-Scripts"
 $Branch = "main"
 
-
 $RawBase = "https://raw.githubusercontent.com/$GitHubUser/$Repository/$Branch"
 $ApiUrl = "https://api.github.com/repos/$GitHubUser/$Repository/contents"
 
@@ -22,10 +21,7 @@ while ($true) {
 
     # Get scripts from GitHub
     try {
-        $Files = Invoke-RestMethod `
-            -Uri $ApiUrl `
-            -UseBasicParsing `
-            -ErrorAction Stop
+        $Files = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
 
         $Scripts = @(
             $Files |
@@ -39,21 +35,12 @@ while ($true) {
     }
     catch {
         Write-Host "Unable to retrieve scripts from GitHub." -ForegroundColor Red
-        Write-Host ""
         Write-Host $_.Exception.Message -ForegroundColor Red
-        Write-Host ""
-
         Read-Host "Press Enter to try again"
         continue
     }
 
-    if ($Scripts.Count -eq 0) {
-        Write-Host "No scripts were found." -ForegroundColor Yellow
-        Read-Host "Press Enter to exit"
-        exit
-    }
-
-    # Display menu
+    # Display scripts
     Write-Host "Available Scripts:" -ForegroundColor Green
     Write-Host ""
 
@@ -62,7 +49,7 @@ while ($true) {
     }
 
     Write-Host ""
-    Write-Host " [R] Refresh Scripts"
+    Write-Host " [R] Refresh"
     Write-Host " [Q] Quit"
     Write-Host ""
 
@@ -71,7 +58,6 @@ while ($true) {
     # Quit
     if ($Choice -eq "Q" -or $Choice -eq "q") {
         Clear-Host
-        Write-Host "Goodbye!" -ForegroundColor Cyan
         exit
     }
 
@@ -80,39 +66,34 @@ while ($true) {
         continue
     }
 
-    # Validate number
+    # Validate selection
     $Number = 0
 
     if (-not [int]::TryParse($Choice, [ref]$Number)) {
-        Write-Host ""
         Write-Host "Invalid selection." -ForegroundColor Red
-        Start-Sleep -Seconds 2
+        Start-Sleep 2
         continue
     }
 
     if ($Number -lt 1 -or $Number -gt $Scripts.Count) {
-        Write-Host ""
         Write-Host "Invalid selection." -ForegroundColor Red
-        Start-Sleep -Seconds 2
+        Start-Sleep 2
         continue
     }
 
-    # Get selected script
+    # Selected script
     $SelectedScript = $Scripts[$Number - 1]
 
-    Clear-Host
-
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "Running: $($SelectedScript.name)" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
+    Write-Host "Selected: $($SelectedScript.name)" -ForegroundColor Cyan
 
+    # Download selected script
     $ScriptUrl = "$RawBase/$($SelectedScript.name)"
     $TempFile = Join-Path $env:TEMP $SelectedScript.name
 
     try {
 
-        Write-Host "Downloading script..." -ForegroundColor Yellow
+        Write-Host "Downloading..." -ForegroundColor Yellow
 
         Invoke-WebRequest `
             -Uri $ScriptUrl `
@@ -120,39 +101,28 @@ while ($true) {
             -UseBasicParsing `
             -ErrorAction Stop
 
-        Write-Host "Starting script..." -ForegroundColor Green
+        Write-Host "Launching Administrator PowerShell..." -ForegroundColor Green
         Write-Host ""
 
-        # Run the selected script
-        & $TempFile
-
-        Write-Host ""
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host "Script finished." -ForegroundColor Green
-        Write-Host "========================================" -ForegroundColor Cyan
-        Write-Host ""
+        # Launch selected script in a new elevated PowerShell window
+        Start-Process powershell.exe `
+            -Verb RunAs `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$TempFile`""
 
     }
     catch {
 
         Write-Host ""
-        Write-Host "The script encountered an error." -ForegroundColor Red
-        Write-Host ""
+        Write-Host "Failed to launch script." -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
-        Write-Host ""
-    }
-    finally {
-
-        # Clean up downloaded script
-        if (Test-Path $TempFile) {
-            Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
-        }
+        Start-Sleep 3
     }
 
-    Write-Host ""
-    Read-Host "Press Enter to return to the main menu"
+    # Give the new PowerShell window time to start
+    Start-Sleep -Seconds 2
 
-    # Loop back to menu
+    # Return to main menu
+    continue
 }
 
 Write-Host "Running $($SelectedScript.name)..." -ForegroundColor Green
