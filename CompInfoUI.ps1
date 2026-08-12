@@ -1,6 +1,23 @@
 # ============================================================
 # COMPUTER INFORMATION GUI
 # ============================================================
+# Windows PowerShell 5.1+
+#
+# Displays:
+#   Computer information
+#   Windows information
+#   Hardware information
+#   BIOS information
+#   Active Directory / Domain information
+#   Domain Controller
+#   Secure Channel
+#   Network adapters
+#   DNS
+#   Storage
+#   Group Policy
+#
+# The PowerShell console is hidden while the GUI is running.
+# ============================================================
 
 [CmdletBinding()]
 param()
@@ -13,7 +30,7 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 
-public class ConsoleWindow {
+public static class ConsoleWindow {
     [DllImport("kernel32.dll")]
     public static extern IntPtr GetConsoleWindow();
 
@@ -28,7 +45,6 @@ public class ConsoleWindow {
 $ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
 
 if ($ConsoleHandle -ne [IntPtr]::Zero) {
-
     [ConsoleWindow]::ShowWindow(
         $ConsoleHandle,
         0
@@ -42,24 +58,9 @@ if ($ConsoleHandle -ne [IntPtr]::Zero) {
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-[System.Windows.Forms.Application]::EnableVisualStyles()
-
 $ErrorActionPreference = "SilentlyContinue"
 
-# Standalone PowerShell GUI
-#
-# Requires:
-#   Windows PowerShell 5.1+
-#   Windows
-#
-# ============================================================
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
 [System.Windows.Forms.Application]::EnableVisualStyles()
-
-$ErrorActionPreference = "SilentlyContinue"
 
 # ============================================================
 # COLORS
@@ -73,6 +74,7 @@ $ColorSubText    = [System.Drawing.Color]::FromArgb(100,116,139)
 $ColorWhite      = [System.Drawing.Color]::White
 $ColorGreen      = [System.Drawing.Color]::FromArgb(22,163,74)
 $ColorRed        = [System.Drawing.Color]::FromArgb(220,38,38)
+$ColorBorder     = [System.Drawing.Color]::FromArgb(226,232,240)
 
 # ============================================================
 # GET COMPUTER INFORMATION
@@ -83,7 +85,8 @@ function Get-ComputerInformation {
     $Computer = Get-CimInstance Win32_ComputerSystem
     $BIOS     = Get-CimInstance Win32_BIOS
     $OS       = Get-CimInstance Win32_OperatingSystem
-    $CPU      = Get-CimInstance Win32_Processor | Select-Object -First 1
+    $CPU      = Get-CimInstance Win32_Processor |
+        Select-Object -First 1
 
     $Registry = Get-ItemProperty `
         "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
@@ -92,7 +95,7 @@ function Get-ComputerInformation {
     # DOMAIN / OU
     # --------------------------------------------------------
 
-    $Domain = $null
+    $Domain = "Not Domain Joined"
     $OU = "Not Domain Joined"
     $DistinguishedName = $null
 
@@ -105,39 +108,50 @@ function Get-ComputerInformation {
             $Searcher = New-Object `
                 System.DirectoryServices.DirectorySearcher
 
-            $Searcher.Filter = `
+            $Searcher.Filter =
                 "(&(objectCategory=computer)(sAMAccountName=$($Computer.Name)`$))"
 
-            $Searcher.PropertiesToLoad.Add(
+            [void]$Searcher.PropertiesToLoad.Add(
                 "distinguishedname"
-            ) | Out-Null
+            )
 
             $Result = $Searcher.FindOne()
 
             if ($Result) {
 
-                $DistinguishedName =
-                    $Result.Properties["distinguishedname"][0]
+                if (
+                    $Result.Properties.Contains(
+                        "distinguishedname"
+                    )
+                ) {
 
-                if ($DistinguishedName) {
+                    $DistinguishedName =
+                        $Result.Properties["distinguishedname"][0]
 
-                    # Remove computer CN
-                    $OU = $DistinguishedName `
-                        -replace '^CN=[^,]+,', ''
+                    if ($DistinguishedName) {
 
-                    # Convert DC=company,DC=local
-                    # portions to a readable domain name
+                        # Remove computer CN
+                        $OU = $DistinguishedName `
+                            -replace '^CN=[^,]+,', ''
 
-                    $OU = $OU `
-                        -replace '(?i),?DC=[^,]+',''
+                        # Remove DC components
+                        $OU = $OU `
+                            -replace '(?i),?DC=[^,]+',''
 
-                    $OU = $OU.Trim(',')
+                        $OU = $OU.Trim(',')
 
-                    if ([string]::IsNullOrWhiteSpace($OU)) {
+                        if (
+                            [string]::IsNullOrWhiteSpace($OU)
+                        ) {
 
-                        $OU = "Domain Root"
+                            $OU = "Domain Root"
+                        }
                     }
                 }
+            }
+            else {
+
+                $OU = "Unable to determine OU"
             }
 
         }
@@ -148,7 +162,9 @@ function Get-ComputerInformation {
     }
     else {
 
-        $Domain = $Computer.Workgroup
+        if ($Computer.Workgroup) {
+            $Domain = $Computer.Workgroup
+        }
     }
 
     # --------------------------------------------------------
@@ -161,12 +177,16 @@ function Get-ComputerInformation {
     )
 
     # --------------------------------------------------------
-    # WINDOWS
+    # WINDOWS VERSION
     # --------------------------------------------------------
 
     $DisplayVersion = $Registry.DisplayVersion
 
-    if ([string]::IsNullOrWhiteSpace($DisplayVersion)) {
+    if (
+        [string]::IsNullOrWhiteSpace(
+            $DisplayVersion
+        )
+    ) {
 
         $DisplayVersion = $Registry.ReleaseId
     }
@@ -175,13 +195,15 @@ function Get-ComputerInformation {
     # UPTIME
     # --------------------------------------------------------
 
-    $Uptime = $null
+    $Uptime = "Unknown"
 
     if ($OS.LastBootUpTime) {
 
         $BootTime = $OS.LastBootUpTime
 
-        $UptimeSpan = (Get-Date) - $BootTime
+        $UptimeSpan = (
+            Get-Date
+        ) - $BootTime
 
         $Uptime = "{0} days, {1} hours, {2} minutes" -f `
             $UptimeSpan.Days,
@@ -197,7 +219,16 @@ function Get-ComputerInformation {
 
     if ($BIOS.ReleaseDate) {
 
-        $BIOSDate = $BIOS.ReleaseDate.ToString("yyyy-MM-dd")
+        try {
+            $BIOSDate =
+                $BIOS.ReleaseDate.ToString(
+                    "yyyy-MM-dd"
+                )
+        }
+        catch {
+            $BIOSDate =
+                $BIOS.ReleaseDate.ToString()
+        }
     }
 
     # --------------------------------------------------------
@@ -218,64 +249,86 @@ function Get-ComputerInformation {
 
         OU = $OU
 
-        DistinguishedName = $DistinguishedName
+        DistinguishedName =
+            $DistinguishedName
 
-        IsDomainJoined = $Computer.PartOfDomain
+        IsDomainJoined =
+            $Computer.PartOfDomain
 
-        Windows = $OS.Caption
+        Windows =
+            $OS.Caption
 
-        DisplayVersion = $DisplayVersion
+        DisplayVersion =
+            $DisplayVersion
 
-        Build = $OS.BuildNumber
+        Build =
+            $OS.BuildNumber
 
-        Architecture = $OS.OSArchitecture
+        Architecture =
+            $OS.OSArchitecture
 
-        InstallDate = $OS.InstallDate
+        InstallDate =
+            $OS.InstallDate
 
-        LastBoot = $OS.LastBootUpTime
+        LastBoot =
+            $OS.LastBootUpTime
 
-        Uptime = $Uptime
+        Uptime =
+            $Uptime
 
-        CPU = $CPU.Name
+        CPU =
+            $CPU.Name
 
-        CPUCores = $CPU.NumberOfCores
+        CPUCores =
+            $CPU.NumberOfCores
 
-        CPUThreads = $CPU.NumberOfLogicalProcessors
+        CPUThreads =
+            $CPU.NumberOfLogicalProcessors
 
-        CPUSpeed = "$($CPU.MaxClockSpeed) MHz"
+        CPUSpeed =
+            "$($CPU.MaxClockSpeed) MHz"
 
-        RAM = "$RAMGB GB"
+        RAM =
+            "$RAMGB GB"
 
-        BIOSManufacturer = $BIOS.Manufacturer
+        BIOSManufacturer =
+            $BIOS.Manufacturer
 
-        BIOSVersion = $BIOS.SMBIOSBIOSVersion
+        BIOSVersion =
+            $BIOS.SMBIOSBIOSVersion
 
-        BIOSDate = $BIOSDate
+        BIOSDate =
+            $BIOSDate
 
-        User = "$env:USERDOMAIN\$env:USERNAME"
+        User =
+            "$env:USERDOMAIN\$env:USERNAME"
     }
 }
 
 # ============================================================
-# GET DOMAIN CONTROLLER
+# DOMAIN CONTROLLER
 # ============================================================
 
 function Get-DomainControllerInfo {
 
-    $Computer = Get-CimInstance Win32_ComputerSystem
+    $Computer =
+        Get-CimInstance Win32_ComputerSystem
 
     if (!$Computer.PartOfDomain) {
 
-        return $null
+        return "Not applicable - computer is not domain joined."
     }
 
     try {
 
-        $Result = nltest /dsgetdc:$($Computer.Domain) 2>&1
+        $Result =
+            nltest /dsgetdc:$($Computer.Domain) 2>&1
 
         if ($LASTEXITCODE -eq 0) {
 
-            return ($Result -join "`r`n")
+            return (
+                $Result -join "`r`n"
+            )
         }
     }
     catch {
@@ -285,34 +338,46 @@ function Get-DomainControllerInfo {
 }
 
 # ============================================================
-# GET DNS INFORMATION
+# DNS INFORMATION
 # ============================================================
 
 function Get-DNSInfo {
 
     try {
 
-        $DNS = Get-DnsClientServerAddress `
-            -AddressFamily IPv4
+        $DNS =
+            Get-DnsClientServerAddress `
+                -AddressFamily IPv4
 
         $Output = @()
 
         foreach ($Adapter in $DNS) {
 
-            if ($Adapter.ServerAddresses.Count -gt 0) {
+            if (
+                $Adapter.ServerAddresses.Count -gt 0
+            ) {
 
-                $Output += "[$($Adapter.InterfaceAlias)]"
+                $Output += "Interface: $($Adapter.InterfaceAlias)"
 
-                foreach ($Server in $Adapter.ServerAddresses) {
+                foreach (
+                    $Server in $Adapter.ServerAddresses
+                ) {
 
-                    $Output += "  $Server"
+                    $Output += "  DNS Server: $Server"
                 }
 
                 $Output += ""
             }
         }
 
-        return ($Output -join "`r`n")
+        if ($Output.Count -eq 0) {
+
+            return "No DNS servers found."
+        }
+
+        return (
+            $Output -join "`r`n"
+        )
     }
     catch {
 
@@ -321,14 +386,15 @@ function Get-DNSInfo {
 }
 
 # ============================================================
-# GET NETWORK INFORMATION
+# NETWORK INFORMATION
 # ============================================================
 
 function Get-NetworkInfo {
 
     try {
 
-        $Adapters = Get-NetAdapter -Physical
+        $Adapters =
+            Get-NetAdapter -Physical
 
         $Output = @()
 
@@ -338,31 +404,51 @@ function Get-NetworkInfo {
             $Output += "Adapter: $($Adapter.Name)"
             $Output += "================================================"
 
-            $Output += "Description : $($Adapter.InterfaceDescription)"
-            $Output += "Status      : $($Adapter.Status)"
-            $Output += "MAC Address : $($Adapter.MacAddress)"
+            $Output +=
+                "Description : $($Adapter.InterfaceDescription)"
 
-            $IPs = Get-NetIPAddress `
-                -InterfaceIndex $Adapter.ifIndex `
-                -AddressFamily IPv4
+            $Output +=
+                "Status      : $($Adapter.Status)"
 
-            foreach ($IP in $IPs) {
+            $Output +=
+                "MAC Address : $($Adapter.MacAddress)"
 
-                if (
-                    $IP.IPAddress -notlike "127.*" -and
-                    $IP.IPAddress -notlike "169.254.*"
-                ) {
+            try {
 
-                    $Output += "IPv4        : $($IP.IPAddress)"
-                    $Output += "Prefix      : $($IP.PrefixLength)"
+                $IPs =
+                    Get-NetIPAddress `
+                        -InterfaceIndex $Adapter.ifIndex `
+                        -AddressFamily IPv4
+
+                foreach ($IP in $IPs) {
+
+                    if (
+                        $IP.IPAddress -notlike "127.*" -and
+                        $IP.IPAddress -notlike "169.254.*"
+                    ) {
+
+                        $Output +=
+                            "IPv4        : $($IP.IPAddress)"
+
+                        $Output +=
+                            "Prefix      : $($IP.PrefixLength)"
+                    }
                 }
+            }
+            catch {
             }
 
             $Output += ""
         }
 
-        return ($Output -join "`r`n")
+        if ($Output.Count -eq 0) {
 
+            return "No physical network adapters found."
+        }
+
+        return (
+            $Output -join "`r`n"
+        )
     }
     catch {
 
@@ -371,15 +457,16 @@ function Get-NetworkInfo {
 }
 
 # ============================================================
-# GET DISK INFORMATION
+# DISK INFORMATION
 # ============================================================
 
 function Get-DiskInfo {
 
     try {
 
-        $Disks = Get-CimInstance Win32_LogicalDisk `
-            -Filter "DriveType=3"
+        $Disks =
+            Get-CimInstance Win32_LogicalDisk `
+                -Filter "DriveType=3"
 
         $Output = @()
 
@@ -404,23 +491,30 @@ function Get-DiskInfo {
 
             if ($Size -gt 0) {
 
-                $FreePercent = [math]::Round(
-                    ($Free / $Size) * 100,
-                    1
-                )
+                $FreePercent =
+                    [math]::Round(
+                        ($Free / $Size) * 100,
+                        1
+                    )
             }
 
-            $Output += "Drive: $($Disk.DeviceID)"
+            $Output += "Drive : $($Disk.DeviceID)"
             $Output += "Volume: $($Disk.VolumeName)"
             $Output += "Total : $Size GB"
             $Output += "Used  : $Used GB"
             $Output += "Free  : $Free GB"
             $Output += "Free% : $FreePercent%"
             $Output += ""
-
         }
 
-        return ($Output -join "`r`n")
+        if ($Output.Count -eq 0) {
+
+            return "No local disks found."
+        }
+
+        return (
+            $Output -join "`r`n"
+        )
     }
     catch {
 
@@ -434,7 +528,8 @@ function Get-DiskInfo {
 
 function Get-SecureChannelInfo {
 
-    $Computer = Get-CimInstance Win32_ComputerSystem
+    $Computer =
+        Get-CimInstance Win32_ComputerSystem
 
     if (!$Computer.PartOfDomain) {
 
@@ -443,19 +538,21 @@ function Get-SecureChannelInfo {
 
     try {
 
-        if (Test-ComputerSecureChannel) {
+        $Healthy =
+            Test-ComputerSecureChannel
 
-            return "HEALTHY"
+        if ($Healthy) {
+
+            return "HEALTHY`r`n`r`nThe computer secure channel is working correctly."
         }
         else {
 
-            return "BROKEN"
+            return "BROKEN`r`n`r`nThe computer secure channel may need repair."
         }
-
     }
     catch {
 
-        return "Unable to test secure channel."
+        return "Unable to test secure channel.`r`n`r`n$($_.Exception.Message)"
     }
 }
 
@@ -471,7 +568,6 @@ function Get-GroupPolicyInfo {
             gpresult /r /scope computer 2>&1 |
             Out-String
         )
-
     }
     catch {
 
@@ -480,480 +576,584 @@ function Get-GroupPolicyInfo {
 }
 
 # ============================================================
-# CREATE LABEL
-# ============================================================
-
-function New-InfoLabel {
-
-    param(
-        [string]$Text
-    )
-
-    $Label = New-Object System.Windows.Forms.Label
-
-    $Label.Text = $Text
-
-    $Label.AutoSize = $true
-
-    $Label.Font = New-Object `
-        System.Drawing.Font(
-            "Segoe UI",
-            10
-        )
-
-    $Label.ForeColor = $ColorText
-
-    return $Label
-}
-
-# ============================================================
 # CREATE DROPDOWN SECTION
+# ============================================================
+#
+# IMPORTANT:
+# This is the ONLY Add-Section function in the script.
+#
 # ============================================================
 
 function Add-Section {
 
     param(
+        [Parameter(Mandatory)]
         [System.Windows.Forms.FlowLayoutPanel]$Parent,
+
+        [Parameter(Mandatory)]
         [string]$Title,
+
+        [Parameter(Mandatory)]
         [string]$Content
     )
 
     # --------------------------------------------------------
-    # Container
+    # SECTION PANEL
     # --------------------------------------------------------
 
-    $Panel = New-Object System.Windows.Forms.Panel
+    $SectionPanel =
+        New-Object System.Windows.Forms.Panel
 
-    $Panel.Width = 760
-    $Panel.Height = 48
+    $SectionPanel.Width = 780
+    $SectionPanel.Height = 48
 
-    $Panel.Margin = New-Object System.Windows.Forms.Padding(
-        0,
-        0,
-        0,
-        8
-    )
+    $SectionPanel.Margin =
+        New-Object System.Windows.Forms.Padding(
+            0,0,0,8
+        )
 
-    $Panel.BackColor = [System.Drawing.Color]::White
+    $SectionPanel.BackColor =
+        [System.Drawing.Color]::White
+
+    $SectionPanel.BorderStyle =
+        [System.Windows.Forms.BorderStyle]::FixedSingle
 
     # --------------------------------------------------------
-    # Button
+    # DROPDOWN BUTTON
     # --------------------------------------------------------
 
-    $Button = New-Object System.Windows.Forms.Button
+    $Button =
+        New-Object System.Windows.Forms.Button
 
-    $Button.Text = "+  $Title"
+    $Button.Text =
+        "[+]  $Title"
 
-    $Button.Width = 740
-    $Button.Height = 42
+    $Button.Location =
+        New-Object System.Drawing.Point(
+            1,1
+        )
 
-    $Button.Location = New-Object System.Drawing.Point(
-        10,
-        3
-    )
+    $Button.Width = 776
+    $Button.Height = 44
 
-    $Button.FlatStyle = "Flat"
+    $Button.FlatStyle =
+        [System.Windows.Forms.FlatStyle]::Flat
 
     $Button.FlatAppearance.BorderSize = 0
 
-    $Button.BackColor = [System.Drawing.Color]::White
+    $Button.BackColor =
+        [System.Drawing.Color]::White
 
-    $Button.ForeColor = [System.Drawing.Color]::FromArgb(
-        30,
-        41,
-        59
-    )
+    $Button.ForeColor =
+        $ColorText
 
-    $Button.Font = New-Object System.Drawing.Font(
-        "Segoe UI Semibold",
-        10
-    )
+    $Button.Font =
+        New-Object System.Drawing.Font(
+            "Segoe UI Semibold",
+            10
+        )
 
-    $Button.TextAlign = "MiddleLeft"
+    $Button.TextAlign =
+        [System.Drawing.ContentAlignment]::MiddleLeft
 
-    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
-
-    # --------------------------------------------------------
-    # Content
-    # --------------------------------------------------------
-
-    $TextBox = New-Object System.Windows.Forms.RichTextBox
-
-    $TextBox.Text = $Content
-
-    $TextBox.ReadOnly = $true
-
-    $TextBox.BackColor = [System.Drawing.Color]::White
-
-    $TextBox.ForeColor = [System.Drawing.Color]::FromArgb(
-        30,
-        41,
-        59
-    )
-
-    $TextBox.BorderStyle = "None"
-
-    $TextBox.Font = New-Object System.Drawing.Font(
-        "Consolas",
-        9
-    )
-
-    $TextBox.Location = New-Object System.Drawing.Point(
-        20,
-        48
-    )
-
-    $TextBox.Width = 720
-
-    $TextBox.Height = 10
-
-    $TextBox.Visible = $false
+    $Button.Cursor =
+        [System.Windows.Forms.Cursors]::Hand
 
     # --------------------------------------------------------
-    # Add Controls
+    # CONTENT BOX
     # --------------------------------------------------------
 
-    $Panel.Controls.Add($Button)
+    $ContentBox =
+        New-Object System.Windows.Forms.RichTextBox
 
-    $Panel.Controls.Add($TextBox)
+    $ContentBox.Text =
+        $Content
+
+    $ContentBox.ReadOnly = $true
+
+    $ContentBox.BorderStyle =
+        [System.Windows.Forms.BorderStyle]::None
+
+    $ContentBox.BackColor =
+        [System.Drawing.Color]::White
+
+    $ContentBox.ForeColor =
+        $ColorText
+
+    $ContentBox.Font =
+        New-Object System.Drawing.Font(
+            "Consolas",
+            9
+        )
+
+    $ContentBox.Location =
+        New-Object System.Drawing.Point(
+            15,50
+        )
+
+    $ContentBox.Width = 748
+
+    $ContentBox.Height = 100
+
+    $ContentBox.Visible = $false
+
+    $ContentBox.ScrollBars =
+        [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
 
     # --------------------------------------------------------
-    # Click Event
+    # STORE DATA IN BUTTON TAG
+    # --------------------------------------------------------
+
+    $Button.Tag = @{
+        SectionPanel = $SectionPanel
+        ContentBox   = $ContentBox
+        Title        = $Title
+    }
+
+    # --------------------------------------------------------
+    # ADD CONTROLS
+    # --------------------------------------------------------
+
+    [void]$SectionPanel.Controls.Add(
+        $Button
+    )
+
+    [void]$SectionPanel.Controls.Add(
+        $ContentBox
+    )
+
+    # --------------------------------------------------------
+    # DROPDOWN CLICK EVENT
     # --------------------------------------------------------
 
     $Button.Add_Click({
 
-        if ($TextBox.Visible -eq $false) {
+        $Data =
+            $this.Tag
 
-            # ================================================
-            # OPEN
-            # ================================================
+        $Panel =
+            $Data.SectionPanel
 
-            $TextBox.Visible = $true
+        $Box =
+            $Data.ContentBox
 
-            $LineCount = ($TextBox.Text -split "`r?`n").Count
+        $SectionTitle =
+            $Data.Title
 
-            $ContentHeight = ($LineCount * 18) + 25
+        # ----------------------------------------------------
+        # OPEN
+        # ----------------------------------------------------
 
-            if ($ContentHeight -lt 80) {
+        if (!$Box.Visible) {
 
-                $ContentHeight = 80
+            # Count lines
+            $LineCount =
+                ($Box.Text -split "`r?`n").Count
+
+            # Calculate height
+            $NewHeight =
+                ($LineCount * 18) + 35
+
+            # Minimum
+            if ($NewHeight -lt 110) {
+
+                $NewHeight = 110
             }
 
-            if ($ContentHeight -gt 400) {
+            # Maximum
+            if ($NewHeight -gt 450) {
 
-                $ContentHeight = 400
+                $NewHeight = 450
             }
 
-            $TextBox.Height = $ContentHeight
+            $Box.Height =
+                $NewHeight - 60
 
-            $Panel.Height = $ContentHeight + 55
+            $Panel.Height =
+                $NewHeight
 
-            $Button.Text = "-  $Title"
+            $Box.Visible = $true
 
+            $this.Text =
+                "[-]  $SectionTitle"
         }
+
+        # ----------------------------------------------------
+        # CLOSE
+        # ----------------------------------------------------
+
         else {
 
-            # ================================================
-            # CLOSE
-            # ================================================
-
-            $TextBox.Visible = $false
+            $Box.Visible = $false
 
             $Panel.Height = 48
 
-            $Button.Text = "+  $Title"
+            $this.Text =
+                "[+]  $SectionTitle"
         }
 
-        $Parent.PerformLayout()
+        # ----------------------------------------------------
+        # FORCE FLOW LAYOUT REFRESH
+        # ----------------------------------------------------
 
-        $Parent.Refresh()
+        if ($Parent) {
+
+            $Parent.SuspendLayout()
+
+            $Parent.ResumeLayout(
+                $true
+            )
+
+            $Parent.PerformLayout()
+
+            $Parent.Refresh()
+        }
     })
 
     # --------------------------------------------------------
-    # Add To Main Panel
+    # ADD SECTION TO FLOW PANEL
     # --------------------------------------------------------
 
-    $Parent.Controls.Add($Panel)
-}
-# ============================================================
-# MAIN WINDOW
-# ============================================================
-
-$Form = New-Object System.Windows.Forms.Form
-
-$Form.Text = "Computer Information"
-
-$Form.Size = New-Object `
-    System.Drawing.Size(
-        850,
-        850
+    [void]$Parent.Controls.Add(
+        $SectionPanel
     )
 
-$Form.StartPosition = "CenterScreen"
+    $Parent.PerformLayout()
+}
 
-$Form.BackColor = $ColorBackground
+# ============================================================
+# CREATE MAIN FORM
+# ============================================================
 
-$Form.MinimumSize = New-Object `
-    System.Drawing.Size(
+$Form =
+    New-Object System.Windows.Forms.Form
+
+$Form.Text =
+    "Computer Information"
+
+$Form.Width = 850
+$Form.Height = 850
+
+$Form.StartPosition =
+    [System.Windows.Forms.FormStartPosition]::CenterScreen
+
+$Form.BackColor =
+    $ColorBackground
+
+$Form.MinimumSize =
+    New-Object System.Drawing.Size(
         700,
         700
     )
 
 # ============================================================
+# SCROLL AREA
+# ============================================================
+
+$ScrollPanel =
+    New-Object System.Windows.Forms.Panel
+
+$ScrollPanel.Dock =
+    [System.Windows.Forms.DockStyle]::Fill
+
+$ScrollPanel.AutoScroll = $true
+
+$ScrollPanel.Padding =
+    New-Object System.Windows.Forms.Padding(
+        25,20,25,20
+    )
+
+$ScrollPanel.BackColor =
+    $ColorBackground
+
+[void]$Form.Controls.Add(
+    $ScrollPanel
+)
+
+# ============================================================
 # HEADER
 # ============================================================
 
-$Header = New-Object System.Windows.Forms.Panel
+$Header =
+    New-Object System.Windows.Forms.Panel
 
-$Header.Dock = "Top"
+$Header.Dock =
+    [System.Windows.Forms.DockStyle]::Top
 
 $Header.Height = 155
 
-$Header.BackColor = $ColorHeader
+$Header.BackColor =
+    $ColorHeader
 
-$Form.Controls.Add($Header)
+[void]$Form.Controls.Add(
+    $Header
+)
 
-# ------------------------------------------------------------
-# Device Name
-# ------------------------------------------------------------
+# Make sure header stays above scroll area
+$Header.BringToFront()
 
-$DeviceLabel = New-Object System.Windows.Forms.Label
+# ============================================================
+# DEVICE LABEL
+# ============================================================
 
-$DeviceLabel.Text = "DEVICE"
+$DeviceLabel =
+    New-Object System.Windows.Forms.Label
 
-$DeviceLabel.Location = New-Object `
-    System.Drawing.Point(
-        30,
-        18
+$DeviceLabel.Text =
+    "DEVICE"
+
+$DeviceLabel.Location =
+    New-Object System.Drawing.Point(
+        30,18
     )
 
 $DeviceLabel.AutoSize = $true
 
-$DeviceLabel.ForeColor = `
+$DeviceLabel.ForeColor =
     [System.Drawing.Color]::FromArgb(
-        148,
-        163,
-        184
+        148,163,184
     )
 
-$DeviceLabel.Font = New-Object `
-    System.Drawing.Font(
+$DeviceLabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI",
         10
     )
 
-$Header.Controls.Add($DeviceLabel)
+[void]$Header.Controls.Add(
+    $DeviceLabel
+)
 
-$DeviceNameLabel = New-Object `
-    System.Windows.Forms.Label
+# ============================================================
+# DEVICE NAME
+# ============================================================
 
-$DeviceNameLabel.Location = New-Object `
-    System.Drawing.Point(
-        28,
-        40
+$DeviceNameLabel =
+    New-Object System.Windows.Forms.Label
+
+$DeviceNameLabel.Location =
+    New-Object System.Drawing.Point(
+        28,40
     )
 
 $DeviceNameLabel.AutoSize = $true
 
-$DeviceNameLabel.ForeColor = $ColorWhite
+$DeviceNameLabel.ForeColor =
+    $ColorWhite
 
-$DeviceNameLabel.Font = New-Object `
-    System.Drawing.Font(
+$DeviceNameLabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI Semibold",
         24
     )
 
-$Header.Controls.Add($DeviceNameLabel)
+[void]$Header.Controls.Add(
+    $DeviceNameLabel
+)
 
-# ------------------------------------------------------------
-# Domain
-# ------------------------------------------------------------
+# ============================================================
+# DOMAIN LABEL
+# ============================================================
 
-$DomainLabel = New-Object System.Windows.Forms.Label
+$DomainLabel =
+    New-Object System.Windows.Forms.Label
 
-$DomainLabel.Text = "DOMAIN"
+$DomainLabel.Text =
+    "DOMAIN"
 
-$DomainLabel.Location = New-Object `
-    System.Drawing.Point(
-        400,
-        18
+$DomainLabel.Location =
+    New-Object System.Drawing.Point(
+        400,18
     )
 
 $DomainLabel.AutoSize = $true
 
-$DomainLabel.ForeColor = `
+$DomainLabel.ForeColor =
     [System.Drawing.Color]::FromArgb(
-        148,
-        163,
-        184
+        148,163,184
     )
 
-$DomainLabel.Font = New-Object `
-    System.Drawing.Font(
+$DomainLabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI",
         10
     )
 
-$Header.Controls.Add($DomainLabel)
+[void]$Header.Controls.Add(
+    $DomainLabel
+)
 
-$DomainValueLabel = New-Object `
-    System.Windows.Forms.Label
+# ============================================================
+# DOMAIN VALUE
+# ============================================================
 
-$DomainValueLabel.Location = New-Object `
-    System.Drawing.Point(
-        398,
-        40
+$DomainValueLabel =
+    New-Object System.Windows.Forms.Label
+
+$DomainValueLabel.Location =
+    New-Object System.Drawing.Point(
+        398,40
     )
 
 $DomainValueLabel.AutoSize = $true
 
-$DomainValueLabel.ForeColor = $ColorWhite
+$DomainValueLabel.MaximumSize =
+    New-Object System.Drawing.Size(
+        390,
+        0
+    )
 
-$DomainValueLabel.Font = New-Object `
-    System.Drawing.Font(
+$DomainValueLabel.ForeColor =
+    $ColorWhite
+
+$DomainValueLabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI Semibold",
         15
     )
 
-$Header.Controls.Add($DomainValueLabel)
+[void]$Header.Controls.Add(
+    $DomainValueLabel
+)
 
-# ------------------------------------------------------------
-# OU
-# ------------------------------------------------------------
+# ============================================================
+# OU LABEL
+# ============================================================
 
-$OULabel = New-Object System.Windows.Forms.Label
+$OULabel =
+    New-Object System.Windows.Forms.Label
 
-$OULabel.Text = "ORGANIZATIONAL UNIT"
+$OULabel.Text =
+    "ORGANIZATIONAL UNIT"
 
-$OULabel.Location = New-Object `
-    System.Drawing.Point(
-        30,
-        95
+$OULabel.Location =
+    New-Object System.Drawing.Point(
+        30,95
     )
 
 $OULabel.AutoSize = $true
 
-$OULabel.ForeColor = `
+$OULabel.ForeColor =
     [System.Drawing.Color]::FromArgb(
-        148,
-        163,
-        184
+        148,163,184
     )
 
-$OULabel.Font = New-Object `
-    System.Drawing.Font(
+$OULabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI",
         9
     )
 
-$Header.Controls.Add($OULabel)
+[void]$Header.Controls.Add(
+    $OULabel
+)
 
-$OUValueLabel = New-Object `
-    System.Windows.Forms.Label
+# ============================================================
+# OU VALUE
+# ============================================================
 
-$OUValueLabel.Location = New-Object `
-    System.Drawing.Point(
-        30,
-        115
+$OUValueLabel =
+    New-Object System.Windows.Forms.Label
+
+$OUValueLabel.Location =
+    New-Object System.Drawing.Point(
+        30,115
     )
 
 $OUValueLabel.AutoSize = $true
 
-$OUValueLabel.MaximumSize = New-Object `
-    System.Drawing.Size(
+$OUValueLabel.MaximumSize =
+    New-Object System.Drawing.Size(
         760,
         0
     )
 
-$OUValueLabel.ForeColor = $ColorWhite
+$OUValueLabel.ForeColor =
+    $ColorWhite
 
-$OUValueLabel.Font = New-Object `
-    System.Drawing.Font(
+$OUValueLabel.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI",
         10
     )
 
-$Header.Controls.Add($OUValueLabel)
+[void]$Header.Controls.Add(
+    $OUValueLabel
+)
 
 # ============================================================
 # REFRESH BUTTON
 # ============================================================
 
-$RefreshButton = New-Object `
-    System.Windows.Forms.Button
+$RefreshButton =
+    New-Object System.Windows.Forms.Button
 
-$RefreshButton.Text = "⟳  Refresh"
+$RefreshButton.Text =
+    "Refresh"
 
-$RefreshButton.Width = 110
-
+$RefreshButton.Width = 100
 $RefreshButton.Height = 35
 
-$RefreshButton.Location = New-Object `
-    System.Drawing.Point(
-        700,
-        20
+$RefreshButton.Location =
+    New-Object System.Drawing.Point(
+        720,20
     )
 
-$RefreshButton.FlatStyle = "Flat"
+$RefreshButton.FlatStyle =
+    [System.Windows.Forms.FlatStyle]::Flat
 
 $RefreshButton.FlatAppearance.BorderSize = 0
 
-$RefreshButton.BackColor = $ColorBlue
+$RefreshButton.BackColor =
+    $ColorBlue
 
-$RefreshButton.ForeColor = $ColorWhite
+$RefreshButton.ForeColor =
+    $ColorWhite
 
-$RefreshButton.Font = New-Object `
-    System.Drawing.Font(
+$RefreshButton.Font =
+    New-Object System.Drawing.Font(
         "Segoe UI Semibold",
         9
     )
 
-$Header.Controls.Add($RefreshButton)
+$RefreshButton.Cursor =
+    [System.Windows.Forms.Cursors]::Hand
 
-# ============================================================
-# SCROLL AREA
-# ============================================================
-
-$ScrollPanel = New-Object `
-    System.Windows.Forms.Panel
-
-$ScrollPanel.Dock = "Fill"
-
-$ScrollPanel.AutoScroll = $true
-
-$ScrollPanel.Padding = New-Object `
-    System.Windows.Forms.Padding(
-        25,
-        20,
-        25,
-        20
-    )
-
-$ScrollPanel.BackColor = $ColorBackground
-
-$Form.Controls.Add($ScrollPanel)
-
-$ScrollPanel.BringToFront()
+[void]$Header.Controls.Add(
+    $RefreshButton
+)
 
 # ============================================================
 # FLOW LAYOUT
 # ============================================================
 
-$Sections = New-Object `
-    System.Windows.Forms.FlowLayoutPanel
+$Sections =
+    New-Object System.Windows.Forms.FlowLayoutPanel
 
-$Sections.FlowDirection = "TopDown"
+$Sections.FlowDirection =
+    [System.Windows.Forms.FlowDirection]::TopDown
 
 $Sections.WrapContents = $false
 
 $Sections.AutoSize = $true
 
-$Sections.Width = 780
+$Sections.AutoSizeMode =
+    [System.Windows.Forms.AutoSizeMode]::GrowAndShrink
 
-$Sections.BackColor = $ColorBackground
+$Sections.Dock =
+    [System.Windows.Forms.DockStyle]::Top
 
-$ScrollPanel.Controls.Add($Sections)
+$Sections.Padding =
+    New-Object System.Windows.Forms.Padding(
+        0,0,0,20
+    )
+
+$Sections.BackColor =
+    $ColorBackground
+
+[void]$ScrollPanel.Controls.Add(
+    $Sections
+)
 
 # ============================================================
 # LOAD INFORMATION
@@ -963,14 +1163,20 @@ function Load-Information {
 
     $RefreshButton.Enabled = $false
 
-    $RefreshButton.Text = "Loading..."
+    $RefreshButton.Text =
+        "Loading..."
 
     try {
 
-        $Info = Get-ComputerInformation
+        # ----------------------------------------------------
+        # GET MAIN COMPUTER INFORMATION
+        # ----------------------------------------------------
+
+        $Info =
+            Get-ComputerInformation
 
         # ----------------------------------------------------
-        # Header
+        # UPDATE HEADER
         # ----------------------------------------------------
 
         $DeviceNameLabel.Text =
@@ -983,23 +1189,23 @@ function Load-Information {
             $Info.OU
 
         # ----------------------------------------------------
-        # Clear Existing Sections
+        # CLEAR OLD SECTIONS
         # ----------------------------------------------------
+
+        $Sections.SuspendLayout()
 
         $Sections.Controls.Clear()
 
         # ----------------------------------------------------
-        # Computer
+        # COMPUTER
         # ----------------------------------------------------
 
         $ComputerInfo = @"
-
 Computer Name : $($Info.ComputerName)
 Manufacturer  : $($Info.Manufacturer)
 Model         : $($Info.Model)
 Serial Number : $($Info.SerialNumber)
 User          : $($Info.User)
-
 "@
 
         Add-Section `
@@ -1008,11 +1214,10 @@ User          : $($Info.User)
             -Content $ComputerInfo
 
         # ----------------------------------------------------
-        # Windows
+        # WINDOWS
         # ----------------------------------------------------
 
         $WindowsInfo = @"
-
 Windows       : $($Info.Windows)
 Version       : $($Info.DisplayVersion)
 Build         : $($Info.Build)
@@ -1020,7 +1225,6 @@ Architecture  : $($Info.Architecture)
 Install Date  : $($Info.InstallDate)
 Last Boot     : $($Info.LastBoot)
 Uptime        : $($Info.Uptime)
-
 "@
 
         Add-Section `
@@ -1029,17 +1233,15 @@ Uptime        : $($Info.Uptime)
             -Content $WindowsInfo
 
         # ----------------------------------------------------
-        # Hardware
+        # HARDWARE
         # ----------------------------------------------------
 
         $HardwareInfo = @"
-
 CPU           : $($Info.CPU)
 Cores         : $($Info.CPUCores)
 Threads       : $($Info.CPUThreads)
 CPU Speed     : $($Info.CPUSpeed)
 Memory        : $($Info.RAM)
-
 "@
 
         Add-Section `
@@ -1052,12 +1254,10 @@ Memory        : $($Info.RAM)
         # ----------------------------------------------------
 
         $BIOSInfo = @"
-
 Manufacturer  : $($Info.BIOSManufacturer)
 Version       : $($Info.BIOSVersion)
 Release Date  : $($Info.BIOSDate)
 Serial Number : $($Info.SerialNumber)
-
 "@
 
         Add-Section `
@@ -1066,11 +1266,10 @@ Serial Number : $($Info.SerialNumber)
             -Content $BIOSInfo
 
         # ----------------------------------------------------
-        # Domain
+        # ACTIVE DIRECTORY
         # ----------------------------------------------------
 
         $DomainInfo = @"
-
 Domain Joined : $($Info.IsDomainJoined)
 Domain        : $($Info.Domain)
 OU            : $($Info.OU)
@@ -1078,7 +1277,6 @@ OU            : $($Info.OU)
 Distinguished Name:
 
 $($Info.DistinguishedName)
-
 "@
 
         Add-Section `
@@ -1087,19 +1285,23 @@ $($Info.DistinguishedName)
             -Content $DomainInfo
 
         # ----------------------------------------------------
-        # Domain Controller
+        # DOMAIN CONTROLLER
         # ----------------------------------------------------
+
+        $DCInfo =
+            Get-DomainControllerInfo
 
         Add-Section `
             -Parent $Sections `
             -Title "Domain Controller" `
-            -Content (Get-DomainControllerInfo)
+            -Content $DCInfo
 
         # ----------------------------------------------------
-        # Secure Channel
+        # SECURE CHANNEL
         # ----------------------------------------------------
 
-        $SecureChannel = Get-SecureChannelInfo
+        $SecureChannel =
+            Get-SecureChannelInfo
 
         Add-Section `
             -Parent $Sections `
@@ -1107,55 +1309,79 @@ $($Info.DistinguishedName)
             -Content $SecureChannel
 
         # ----------------------------------------------------
-        # Network
+        # NETWORK
         # ----------------------------------------------------
+
+        $NetworkInfo =
+            Get-NetworkInfo
 
         Add-Section `
             -Parent $Sections `
             -Title "Network Adapters" `
-            -Content (Get-NetworkInfo)
+            -Content $NetworkInfo
 
         # ----------------------------------------------------
         # DNS
         # ----------------------------------------------------
 
+        $DNSInfo =
+            Get-DNSInfo
+
         Add-Section `
             -Parent $Sections `
             -Title "DNS" `
-            -Content (Get-DNSInfo)
+            -Content $DNSInfo
 
         # ----------------------------------------------------
-        # Storage
+        # STORAGE
         # ----------------------------------------------------
+
+        $DiskInfo =
+            Get-DiskInfo
 
         Add-Section `
             -Parent $Sections `
             -Title "Storage" `
-            -Content (Get-DiskInfo)
+            -Content $DiskInfo
 
         # ----------------------------------------------------
-        # Group Policy
+        # GROUP POLICY
         # ----------------------------------------------------
+
+        $GPInfo =
+            Get-GroupPolicyInfo
 
         Add-Section `
             -Parent $Sections `
             -Title "Group Policy" `
-            -Content (Get-GroupPolicyInfo)
+            -Content $GPInfo
+
+        $Sections.ResumeLayout(
+            $true
+        )
+
+        $Sections.PerformLayout()
+        $ScrollPanel.PerformLayout()
 
     }
     catch {
 
+        $Sections.ResumeLayout(
+            $true
+        )
+
         [System.Windows.Forms.MessageBox]::Show(
             "Unable to load computer information.`r`n`r`n$($_.Exception.Message)",
             "Computer Information",
-            "OK",
-            "Error"
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Error
         )
     }
 
     $RefreshButton.Enabled = $true
 
-    $RefreshButton.Text = "⟳  Refresh"
+    $RefreshButton.Text =
+        "Refresh"
 }
 
 # ============================================================
@@ -1165,17 +1391,33 @@ $($Info.DistinguishedName)
 $RefreshButton.Add_Click({
 
     Load-Information
-
 })
 
 # ============================================================
-# FORM LOAD
+# FORM SHOWN EVENT
 # ============================================================
 
 $Form.Add_Shown({
 
     Load-Information
+})
 
+# ============================================================
+# FORM CLOSE EVENT
+# ============================================================
+
+$Form.Add_FormClosed({
+
+    # Restore console if this script was launched
+    # from an existing PowerShell console.
+
+    if ($ConsoleHandle -ne [IntPtr]::Zero) {
+
+        [ConsoleWindow]::ShowWindow(
+            $ConsoleHandle,
+            5
+        )
+    }
 })
 
 # ============================================================
