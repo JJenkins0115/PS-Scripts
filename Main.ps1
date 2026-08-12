@@ -12,29 +12,21 @@
 param()
 
 # ============================================================
-# SETTINGS
+# GITHUB SETTINGS
 # ============================================================
 
-# GitHub information
 $GitHubUser       = "JJenkins0115"
 $GitHubRepository = "PS-Scripts"
 $GitHubBranch     = "main"
 
-# Folder containing your scripts
-#
-# Leave this as "" to search the entire repository.
-#
-# Example:
-# $ScriptRootFolder = "Scripts"
-#
+# Leave blank if your folders are directly under the repository
 $ScriptRootFolder = ""
 
-# Main script name
-$MainScriptName = "Main.ps1"
+# Main launcher
+$MainScriptName   = "Main.ps1"
 
-# Temporary working directory
-$TempFolderName = "AdminToolKit"
-
+# Temporary local folder
+$TempFolderName   = "AdminToolKit"
 # ============================================================
 # HIDE POWERSHELL CONSOLE
 # ============================================================
@@ -492,115 +484,121 @@ function New-ToolButton {
 }
 
 # ============================================================
-# GET REPOSITORY
+# GET FILES FROM GITHUB
 # ============================================================
 
 function Get-RepositoryFiles {
 
-    $StatusLabel.Text = "Connecting to GitHub..."
-
     try {
 
+        $ApiUrl = "https://api.github.com/repos/$GitHubUser/$GitHubRepository/contents"
+
+        if (![string]::IsNullOrWhiteSpace($ScriptRootFolder)) {
+
+            $ApiUrl = "$ApiUrl/$ScriptRootFolder"
+
+        }
+
+        $ApiUrl = "$ApiUrl`?ref=$GitHubBranch"
+
+        Write-Host "Connecting to GitHub..." -ForegroundColor Cyan
+
         $Headers = @{
-            "User-Agent" = "AdminToolkit"
+            "User-Agent" = "PowerShell-AdminToolKit"
             "Accept"     = "application/vnd.github+json"
         }
 
-        $Response = Invoke-RestMethod `
-            -Uri $GitHubApiURL `
+        $RootItems = Invoke-RestMethod `
+            -Uri $ApiUrl `
             -Headers $Headers `
-            -Method Get
-
-        if (!$Response.tree) {
-
-            throw "GitHub did not return a repository file tree."
-
-        }
+            -Method Get `
+            -UseBasicParsing `
+            -ErrorAction Stop
 
         $Files = @()
 
-        foreach ($Item in $Response.tree) {
+        foreach ($Item in @($RootItems)) {
 
-            if ($Item.type -ne "blob") {
+            # ------------------------------------------------
+            # FILE
+            # ------------------------------------------------
 
-                continue
+            if ($Item.type -eq "file") {
 
-            }
+                if ($Item.name -like "*.ps1") {
 
-            if ($Item.path -notmatch '(?i)\.ps1$') {
-
-                continue
-
-            }
-
-            if (
-                $Item.path -eq $MainScriptName -or
-                $Item.path -match "(?i)(^|/)$([regex]::Escape($MainScriptName))$"
-            ) {
-
-                continue
-
-            }
-
-            if (
-                ![string]::IsNullOrWhiteSpace($ScriptRootFolder)
-            ) {
-
-                $Root = $ScriptRootFolder.Trim('/')
-
-                if (
-                    !$Item.path.StartsWith(
-                        "$Root/",
-                        [System.StringComparison]::OrdinalIgnoreCase
-                    )
-                ) {
-
-                    continue
+                    $Files += [PSCustomObject]@{
+                        Name        = $Item.name
+                        Path        = $Item.path
+                        DownloadUrl = $Item.download_url
+                        Type        = "file"
+                    }
 
                 }
 
             }
 
-            $Files += [PSCustomObject]@{
+            # ------------------------------------------------
+            # FOLDER
+            # ------------------------------------------------
 
-                Name = Split-Path `
-                    $Item.path `
-                    -Leaf
+            elseif ($Item.type -eq "dir") {
 
-                Path = $Item.path
+                try {
 
-                Type = "Script"
+                    $FolderItems = Invoke-RestMethod `
+                        -Uri "$($Item.url)?ref=$GitHubBranch" `
+                        -Headers $Headers `
+                        -Method Get `
+                        -UseBasicParsing `
+                        -ErrorAction Stop
 
-                URL = "$GitHubRawBase/$($Item.path)"
+                    foreach ($FolderItem in @($FolderItems)) {
+
+                        if (
+                            $FolderItem.type -eq "file" -and
+                            $FolderItem.name -like "*.ps1"
+                        ) {
+
+                            $Files += [PSCustomObject]@{
+                                Name        = $FolderItem.name
+                                Path        = $FolderItem.path
+                                DownloadUrl = $FolderItem.download_url
+                                Type        = "file"
+                            }
+
+                        }
+
+                    }
+
+                }
+                catch {
+
+                    Write-Warning `
+                        "Unable to read folder: $($Item.name)"
+
+                }
 
             }
 
         }
 
-        $script:RepositoryFiles = $Files |
-            Sort-Object Path
+        if ($Files.Count -eq 0) {
 
-        $StatusLabel.Text =
-            "$($script:RepositoryFiles.Count) PowerShell tool(s) found"
+            throw "GitHub connected successfully, but no PS1 files were found."
 
-        return $true
+        }
+
+        return @($Files)
 
     }
     catch {
 
-        $StatusLabel.Text = "Unable to retrieve repository"
+        throw "Unable to retrieve scripts from GitHub.`r`n`r`n$($_.Exception.Message)"
 
-        [System.Windows.Forms.MessageBox]::Show(
-            "Unable to retrieve scripts from GitHub.`r`n`r`n$($_.Exception.Message)",
-            "Admin Toolkit",
-            "OK",
-            "Error"
-        ) | Out-Null
-
-        return $false
     }
-}
 
+}
 # ============================================================
 # CLEAR BUTTONS
 # ============================================================
@@ -1023,7 +1021,7 @@ $RefreshButton.Add_Click({
 
 $Form.Add_Shown({
 
-    if (Get-RepositoryFiles) {
+    if () {
 
         Show-Categories
 
