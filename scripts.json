@@ -19,6 +19,10 @@
         {
             "Name": "Battery Tools",
             "File": "Hardware/BatteryTools.ps1"
+        },
+        {
+            "Name": "Check Storage",
+            "File": "Hardware/CheckStorage.ps1"
         }
     ],
     "Updates": [
