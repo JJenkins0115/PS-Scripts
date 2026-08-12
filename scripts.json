@@ -1,0 +1,30 @@
+{
+    "Computer": [
+        {
+            "Name": "Computer Information",
+            "File": "Computer/CompInfoUI.ps1"
+        },
+        {
+            "Name": "Rename Computer",
+            "File": "Computer/ChangeName.ps1"
+        }
+    ],
+    "Applications": [
+        {
+            "Name": "Application Cleanup",
+            "File": "Applications/InteractiveUninstallTool.ps1"
+        }
+    ],
+    "Hardware": [
+        {
+            "Name": "Battery Tools",
+            "File": "Network/BatteryTools.ps1"
+        }
+    ],
+    "Updates": [
+        {
+            "Name": "Updates",
+            "File": "Domain/RunUpdate.ps1"
+        }
+    ]
+}
