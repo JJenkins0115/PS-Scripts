@@ -1021,11 +1021,7 @@ $RefreshButton.Add_Click({
 
 $Form.Add_Shown({
 
-    if () {
-
-        Show-Categories
-
-    }
+    Show-Categories
 
 })
 
@@ -1039,18 +1035,12 @@ $Form.Add_Shown({
 # CLEANUP
 # ============================================================
 
-try {
+if ($TempRoot -and (Test-Path $TempRoot)) {
 
-    if (Test-Path $TempRoot) {
+    Remove-Item `
+        -Path $TempRoot `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
 
-        Remove-Item `
-            $TempRoot `
-            -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-    }
-
-}
-catch {
 }
