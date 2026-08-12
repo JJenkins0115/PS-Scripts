@@ -132,26 +132,6 @@ function Start-Elevation {
 }
 
 #------------------------------------------------------------
-# GPResult
-#------------------------------------------------------------
-
-function Show-GPResult {
-
-    if ($SkipGPResult) {
-
-        return
-
-    }
-
-    Write-Info "Displaying Computer Group Policy..."
-
-    gpresult /r /scope computer
-
-    Pause
-
-}
-
-#------------------------------------------------------------
 # Initialization
 #------------------------------------------------------------
 
@@ -164,8 +144,6 @@ function Initialize-Script {
     Write-Info "Starting Application Cleanup Tool"
 
     Write-Info "PowerShell Version $($PSVersionTable.PSVersion)"
-
-    Show-GPResult
 
     Write-Success "Initialization Complete"
 
