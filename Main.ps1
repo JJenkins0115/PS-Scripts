@@ -21,6 +21,7 @@ $TempFolder = Join-Path $env:TEMP "AdminToolkit"
 $GitHubAPI = "https://api.github.com/repos/$GitHubOwner/$GitHubRepo/git/trees/$GitHubBranch`?recursive=1"
 
 $RawBase = "https://raw.githubusercontent.com/$GitHubOwner/$GitHubRepo/$GitHubBranch"
+
 # ============================================================
 # HIDE POWERSHELL CONSOLE
 # ============================================================
@@ -129,7 +130,7 @@ function Get-GitHubScripts {
             }
 
             # Do not display main.ps1 as a tool
-            if ($Item.path -eq "main.ps1") {
+            if ($Item.path -eq "Main.ps1") {
                 continue
             }
 
