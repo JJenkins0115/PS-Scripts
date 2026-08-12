@@ -618,7 +618,6 @@ function Clear-ToolButtons {
 function Show-Categories {
 
     $script:CurrentFolder = ""
-
     $script:CurrentScript = $null
 
     $BackButton.Visible = $false
@@ -630,7 +629,10 @@ function Show-Categories {
 
     Clear-ToolButtons
 
-    if (!$script:RepositoryFiles -or $script:RepositoryFiles.Count -eq 0) {
+    if (
+        $null -eq $script:RepositoryFiles -or
+        $script:RepositoryFiles.Count -eq 0
+    ) {
 
         $EmptyButton = New-ToolButton `
             -Text "No PowerShell Scripts Found" `
@@ -642,7 +644,7 @@ function Show-Categories {
     }
 
     # --------------------------------------------------------
-    # FIND FOLDERS
+    # FIND TOP-LEVEL FOLDERS
     # --------------------------------------------------------
 
     $Folders = @()
@@ -660,9 +662,7 @@ function Show-Categories {
                 $Folders += $Folder
 
             }
-
         }
-
     }
 
     # --------------------------------------------------------
@@ -671,46 +671,48 @@ function Show-Categories {
 
     foreach ($Folder in ($Folders | Sort-Object)) {
 
+        $FolderPath = $Folder
+
         $Count = @(
             $script:RepositoryFiles |
             Where-Object {
-                $_.Path.StartsWith("$Folder/")
+                $_.Path.StartsWith(
+                    "$FolderPath/",
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
             }
         ).Count
 
         $Button = New-ToolButton `
             -Text $Folder `
-            -Description "$Count tool(s)"
-
-        $FolderName = $Folder
+            -Description "$Count PowerShell tool(s)"
 
         $Button.Add_Click({
 
-            Show-Folder -Folder $FolderName
+            Show-Folder -Folder $FolderPath
 
         }.GetNewClosure())
 
         $ButtonPanel.Controls.Add($Button)
-
     }
 
     # --------------------------------------------------------
-    # SHOW ROOT SCRIPTS
+    # SHOW SCRIPTS IN ROOT OF REPOSITORY
     # --------------------------------------------------------
 
     $RootScripts = @(
         $script:RepositoryFiles |
         Where-Object {
-            ($_ .Path -notmatch "/")
+            $_.Path -notmatch "/"
         }
     )
 
-    foreach ($Script in $RootScripts) {
+    foreach ($ScriptFile in ($RootScripts | Sort-Object Path)) {
 
-        $ScriptItem = $Script
+        $ScriptItem = $ScriptFile
 
         $Button = New-ToolButton `
-            -Text $Script.Name `
+            -Text $ScriptFile.Name `
             -Description "PowerShell Script"
 
         $Button.Add_Click({
@@ -720,131 +722,8 @@ function Show-Categories {
         }.GetNewClosure())
 
         $ButtonPanel.Controls.Add($Button)
-
     }
 }
-
-# ============================================================
-# SHOW FOLDER
-# ============================================================
-
-function Show-Folder {
-
-    param(
-        [string]$Folder
-    )
-
-    $script:CurrentFolder = $Folder
-
-    $BackButton.Visible = $true
-
-    $ViewTitle.Text = $Folder
-
-    $ViewDescription.Text =
-        "Select a PowerShell tool to run."
-
-    Clear-ToolButtons
-
-    $Files = @(
-        $script:RepositoryFiles |
-        Where-Object {
-
-            $_.Path.StartsWith(
-                "$Folder/",
-                [System.StringComparison]::OrdinalIgnoreCase
-            )
-
-        }
-    )
-
-    # --------------------------------------------------------
-    # SUBFOLDERS
-    # --------------------------------------------------------
-
-    $SubFolders = @()
-
-    foreach ($File in $Files) {
-
-        $Remaining = $File.Path.Substring(
-            $Folder.Length + 1
-        )
-
-        $Parts = $Remaining -split "/"
-
-        if ($Parts.Count -gt 1) {
-
-            $SubFolder = $Parts[0]
-
-            if ($SubFolders -notcontains $SubFolder) {
-
-                $SubFolders += $SubFolder
-
-            }
-
-        }
-
-    }
-
-    foreach ($SubFolder in ($SubFolders | Sort-Object)) {
-
-        $FullFolder = "$Folder/$SubFolder"
-
-        $Count = @(
-            $script:RepositoryFiles |
-            Where-Object {
-                $_.Path.StartsWith("$FullFolder/")
-            }
-        ).Count
-
-        $Button = New-ToolButton `
-            -Text $SubFolder `
-            -Description "$Count tool(s)"
-
-        $FolderName = $FullFolder
-
-        $Button.Add_Click({
-
-            Show-Folder -Folder $FolderName
-
-        }.GetNewClosure())
-
-        $ButtonPanel.Controls.Add($Button)
-
-    }
-
-    # --------------------------------------------------------
-    # SCRIPTS IN THIS FOLDER
-    # --------------------------------------------------------
-
-    foreach ($File in ($Files | Sort-Object Path)) {
-
-        $Relative = $File.Path.Substring(
-            $Folder.Length + 1
-        )
-
-        if ($Relative -match "/") {
-
-            continue
-
-        }
-
-        $ScriptItem = $File
-
-        $Button = New-ToolButton `
-            -Text $File.Name `
-            -Description "PowerShell Script"
-
-        $Button.Add_Click({
-
-            Run-RepositoryScript -Script $ScriptItem
-
-        }.GetNewClosure())
-
-        $ButtonPanel.Controls.Add($Button)
-
-    }
-}
-
 # ============================================================
 # RUN SCRIPT
 # ============================================================
