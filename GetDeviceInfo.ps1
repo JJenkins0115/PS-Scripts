@@ -2,9 +2,12 @@
 param()
 
 # ============================================================
-# DOMAIN INFORMATION TOOL
+# COMPLETE COMPUTER INFORMATION TOOL
+# ============================================================
 # Standalone Script
-# Version 1.0
+# Does NOT depend on AppCleanup.ps1
+#
+# Version: 2.0
 # ============================================================
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -19,37 +22,166 @@ function Show-Banner {
 
     Write-Host ""
     Write-Host "==========================================================" -ForegroundColor Cyan
-    Write-Host "                 DOMAIN INFORMATION" -ForegroundColor Cyan
+    Write-Host "             COMPLETE COMPUTER INFORMATION" -ForegroundColor Cyan
     Write-Host "==========================================================" -ForegroundColor Cyan
     Write-Host ""
 
 }
 
 # ============================================================
-# COMPUTER INFORMATION
+# COMPUTER / HARDWARE INFORMATION
 # ============================================================
 
-function Show-ComputerInformation {
+function Show-HardwareInformation {
 
-    $Computer = Get-CimInstance Win32_ComputerSystem
+    # --------------------------------------------------------
+    # Gather Hardware Info
+    # --------------------------------------------------------
 
-    Write-Host "COMPUTER INFORMATION" -ForegroundColor Green
+    $CompSys = Get-CimInstance Win32_ComputerSystem
+    $BIOS    = Get-CimInstance Win32_BIOS
+    $OS      = Get-CimInstance Win32_OperatingSystem
+    $CPU     = Get-CimInstance Win32_Processor |
+               Select-Object -First 1
+
+    # --------------------------------------------------------
+    # Hardware Values
+    # --------------------------------------------------------
+
+    $Serial = $BIOS.SerialNumber
+    $Model  = $CompSys.Model
+
+    # --------------------------------------------------------
+    # Windows Version / Build Info
+    # --------------------------------------------------------
+
+    $WinVersion = $OS.Caption
+    $WinBuild   = $OS.BuildNumber
+
+    $WinDisplayVersion = (
+        Get-ItemProperty `
+            "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    ).DisplayVersion
+
+    # --------------------------------------------------------
+    # Manufacturer
+    # --------------------------------------------------------
+
+    $Manufacturer = $CompSys.Manufacturer
+
+    # --------------------------------------------------------
+    # RAM
+    # --------------------------------------------------------
+
+    $TotalRAMGB = [math]::Round(
+        $CompSys.TotalPhysicalMemory / 1GB,
+        2
+    )
+
+    # --------------------------------------------------------
+    # CPU
+    # --------------------------------------------------------
+
+    $CPUName = $CPU.Name
+    $CPUCores = $CPU.NumberOfCores
+    $CPUThreads = $CPU.NumberOfLogicalProcessors
+    $CPUMaxSpeed = $CPU.MaxClockSpeed
+
+    # --------------------------------------------------------
+    # BIOS
+    # --------------------------------------------------------
+
+    $BIOSVersion = $BIOS.SMBIOSBIOSVersion
+    $BIOSManufacturer = $BIOS.Manufacturer
+    $BIOSDate = $BIOS.ReleaseDate
+
+    if ($BIOSDate) {
+
+        $BIOSDate = $BIOSDate.ToString("yyyy-MM-dd")
+    }
+
+    # --------------------------------------------------------
+    # Windows Architecture
+    # --------------------------------------------------------
+
+    $Architecture = $OS.OSArchitecture
+
+    # --------------------------------------------------------
+    # Windows Install Date
+    # --------------------------------------------------------
+
+    $InstallDate = $OS.InstallDate
+
+    if ($InstallDate) {
+
+        $InstallDate = $InstallDate.ToString("yyyy-MM-dd HH:mm:ss")
+    }
+
+    # --------------------------------------------------------
+    # Last Boot Time
+    # --------------------------------------------------------
+
+    $LastBoot = $OS.LastBootUpTime
+
+    if ($LastBoot) {
+
+        $LastBoot = $LastBoot.ToString("yyyy-MM-dd HH:mm:ss")
+    }
+
+    # ========================================================
+    # DISPLAY
+    # ========================================================
+
+    Write-Host "HARDWARE INFORMATION" -ForegroundColor Green
     Write-Host "----------------------------------------------------------"
 
-    Write-Host ("Computer Name       : {0}" -f $Computer.Name)
-    Write-Host ("Manufacturer        : {0}" -f $Computer.Manufacturer)
-    Write-Host ("Model               : {0}" -f $Computer.Model)
+    Write-Host ("Manufacturer        : {0}" -f $Manufacturer)
+    Write-Host ("Model               : {0}" -f $Model)
+    Write-Host ("Serial Number       : {0}" -f $Serial)
 
-    if ($Computer.PartOfDomain) {
+    Write-Host ""
 
-        Write-Host ("Domain              : {0}" -f $Computer.Domain)
+    Write-Host "PROCESSOR" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
 
-    }
-    else {
+    Write-Host ("CPU                 : {0}" -f $CPUName)
+    Write-Host ("Cores               : {0}" -f $CPUCores)
+    Write-Host ("Logical Processors  : {0}" -f $CPUThreads)
+    Write-Host ("Max Speed           : {0} MHz" -f $CPUMaxSpeed)
 
-        Write-Host ("Workgroup           : {0}" -f $Computer.Workgroup)
+    Write-Host ""
 
-    }
+    Write-Host "MEMORY" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
+
+    Write-Host ("Installed RAM       : {0} GB" -f $TotalRAMGB)
+
+    Write-Host ""
+
+    Write-Host "BIOS" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
+
+    Write-Host ("BIOS Manufacturer    : {0}" -f $BIOSManufacturer)
+    Write-Host ("BIOS Version         : {0}" -f $BIOSVersion)
+    Write-Host ("BIOS Release Date    : {0}" -f $BIOSDate)
+
+    Write-Host ""
+
+    Write-Host "WINDOWS" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
+
+    Write-Host ("Windows Version      : {0}" -f $WinVersion)
+    Write-Host ("Display Version      : {0}" -f $WinDisplayVersion)
+    Write-Host ("Build Number         : {0}" -f $WinBuild)
+    Write-Host ("Architecture         : {0}" -f $Architecture)
+
+    Write-Host ""
+
+    Write-Host "SYSTEM DATES" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
+
+    Write-Host ("Windows Installed    : {0}" -f $InstallDate)
+    Write-Host ("Last Boot            : {0}" -f $LastBoot)
 
     Write-Host ""
 
@@ -68,32 +200,39 @@ function Show-DomainInformation {
 
     if (!$Computer.PartOfDomain) {
 
-        Write-Host "Domain Joined       : NO" -ForegroundColor Yellow
-        Write-Host ("Workgroup           : {0}" -f $Computer.Workgroup)
+        Write-Host "Domain Joined        : NO" -ForegroundColor Yellow
+        Write-Host ("Workgroup            : {0}" -f $Computer.Workgroup)
 
         Write-Host ""
+
         return
     }
 
-    Write-Host "Domain Joined       : YES" -ForegroundColor Green
-    Write-Host ("Domain              : {0}" -f $Computer.Domain)
-    Write-Host ("Domain Role         : {0}" -f $Computer.DomainRole)
+    Write-Host "Domain Joined        : YES" -ForegroundColor Green
+
+    Write-Host ("Domain               : {0}" -f $Computer.Domain)
+
+    Write-Host ("Domain Role          : {0}" -f $Computer.DomainRole)
 
     try {
 
-        $Domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
+        $Domain = `
+            [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
 
-        Write-Host ("Domain Name         : {0}" -f $Domain.Name)
-        Write-Host ("Forest              : {0}" -f $Domain.Forest.Name)
+        Write-Host ("Domain Name          : {0}" -f $Domain.Name)
+
+        Write-Host ("Forest               : {0}" -f $Domain.Forest.Name)
 
         Write-Host ""
 
         Write-Host "DOMAIN ROLES" -ForegroundColor Green
         Write-Host "----------------------------------------------------------"
 
-        Write-Host ("PDC Emulator        : {0}" -f $Domain.PdcRoleOwner.Name)
-        Write-Host ("RID Master          : {0}" -f $Domain.RidRoleOwner.Name)
-        Write-Host ("Infrastructure      : {0}" -f $Domain.InfrastructureRoleOwner.Name)
+        Write-Host ("PDC Emulator         : {0}" -f $Domain.PdcRoleOwner.Name)
+
+        Write-Host ("RID Master           : {0}" -f $Domain.RidRoleOwner.Name)
+
+        Write-Host ("Infrastructure       : {0}" -f $Domain.InfrastructureRoleOwner.Name)
 
     }
     catch {
@@ -101,7 +240,6 @@ function Show-DomainInformation {
         Write-Host ""
         Write-Host "Active Directory domain details unavailable." `
             -ForegroundColor Yellow
-
     }
 
     Write-Host ""
@@ -109,19 +247,22 @@ function Show-DomainInformation {
 }
 
 # ============================================================
-# CURRENT USER
+# USER INFORMATION
 # ============================================================
 
 function Show-UserInformation {
 
-    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Identity = `
+        [Security.Principal.WindowsIdentity]::GetCurrent()
 
     Write-Host "USER INFORMATION" -ForegroundColor Green
     Write-Host "----------------------------------------------------------"
 
-    Write-Host ("Current User        : {0}" -f $Identity.Name)
-    Write-Host ("Username            : {0}" -f $env:USERNAME)
-    Write-Host ("User Domain         : {0}" -f $env:USERDOMAIN)
+    Write-Host ("Current User         : {0}" -f $Identity.Name)
+
+    Write-Host ("Username             : {0}" -f $env:USERNAME)
+
+    Write-Host ("User Domain          : {0}" -f $env:USERDOMAIN)
 
     Write-Host ""
 
@@ -140,7 +281,8 @@ function Show-DomainController {
 
     if (!$Computer.PartOfDomain) {
 
-        Write-Host "Computer is not domain joined." -ForegroundColor Yellow
+        Write-Host "Computer is not domain joined." `
+            -ForegroundColor Yellow
 
         Write-Host ""
 
@@ -148,7 +290,7 @@ function Show-DomainController {
     }
 
     # --------------------------------------------------------
-    # Try nltest first
+    # NLTEST
     # --------------------------------------------------------
 
     try {
@@ -172,10 +314,12 @@ function Show-DomainController {
     }
 
     # --------------------------------------------------------
-    # Try Active Directory module
+    # Active Directory Module
     # --------------------------------------------------------
 
-    if (Get-Command Get-ADDomainController -ErrorAction SilentlyContinue) {
+    if (Get-Command `
+        Get-ADDomainController `
+        -ErrorAction SilentlyContinue) {
 
         try {
 
@@ -183,10 +327,13 @@ function Show-DomainController {
                 -Discover `
                 -ErrorAction Stop
 
-            Write-Host ("Host Name           : {0}" -f $DC.HostName)
-            Write-Host ("IPv4 Address        : {0}" -f $DC.IPv4Address)
-            Write-Host ("Site                : {0}" -f $DC.Site)
-            Write-Host ("Operating System    : {0}" -f $DC.OperatingSystem)
+            Write-Host ("Host Name            : {0}" -f $DC.HostName)
+
+            Write-Host ("IPv4 Address         : {0}" -f $DC.IPv4Address)
+
+            Write-Host ("Site                 : {0}" -f $DC.Site)
+
+            Write-Host ("Operating System     : {0}" -f $DC.OperatingSystem)
 
             Write-Host ""
 
@@ -195,7 +342,6 @@ function Show-DomainController {
         }
         catch {
         }
-
     }
 
     Write-Host "Unable to locate domain controller." `
@@ -231,23 +377,21 @@ function Show-SecureChannel {
 
         if ($SecureChannel) {
 
-            Write-Host "Secure Channel     : HEALTHY" `
+            Write-Host "Secure Channel      : HEALTHY" `
                 -ForegroundColor Green
 
         }
         else {
 
-            Write-Host "Secure Channel     : BROKEN" `
+            Write-Host "Secure Channel      : BROKEN" `
                 -ForegroundColor Red
-
         }
 
     }
     catch {
 
-        Write-Host "Secure Channel     : Unable to test" `
+        Write-Host "Secure Channel      : Unable to test" `
             -ForegroundColor Yellow
-
     }
 
     Write-Host ""
@@ -274,24 +418,20 @@ function Show-DNSInformation {
             if ($Adapter.ServerAddresses.Count -gt 0) {
 
                 Write-Host ""
+
                 Write-Host "Interface: $($Adapter.InterfaceAlias)"
 
                 foreach ($Server in $Adapter.ServerAddresses) {
 
-                    Write-Host "  DNS Server       : $Server"
-
+                    Write-Host "  DNS Server         : $Server"
                 }
-
             }
-
         }
-
     }
     catch {
 
         Write-Host "Unable to retrieve DNS information." `
             -ForegroundColor Yellow
-
     }
 
     Write-Host ""
@@ -309,37 +449,121 @@ function Show-NetworkInformation {
 
     try {
 
-        $IPAddresses = Get-NetIPAddress `
-            -AddressFamily IPv4 `
-            -ErrorAction Stop |
-            Where-Object {
+        $Adapters = Get-NetAdapter `
+            -Physical `
+            -ErrorAction Stop
 
-                $_.IPAddress -notlike "127.*" -and
-                $_.IPAddress -notlike "169.254.*"
+        foreach ($Adapter in $Adapters) {
+
+            Write-Host ""
+
+            Write-Host ("Adapter              : {0}" -f $Adapter.Name)
+
+            Write-Host ("Description          : {0}" -f $Adapter.InterfaceDescription)
+
+            Write-Host ("Status               : {0}" -f $Adapter.Status)
+
+            Write-Host ("MAC Address          : {0}" -f $Adapter.MacAddress)
+
+            $IPs = Get-NetIPAddress `
+                -InterfaceIndex $Adapter.ifIndex `
+                -AddressFamily IPv4 `
+                -ErrorAction SilentlyContinue
+
+            foreach ($IP in $IPs) {
+
+                if (
+                    $IP.IPAddress -notlike "127.*" -and
+                    $IP.IPAddress -notlike "169.254.*"
+                ) {
+
+                    Write-Host ("IPv4 Address         : {0}" -f $IP.IPAddress)
+
+                    Write-Host ("Prefix Length        : {0}" -f $IP.PrefixLength)
+                }
+            }
+        }
+    }
+    catch {
+
+        Write-Host "Unable to retrieve network information." `
+            -ForegroundColor Yellow
+    }
+
+    Write-Host ""
+
+}
+
+# ============================================================
+# DISK INFORMATION
+# ============================================================
+
+function Show-DiskInformation {
+
+    Write-Host "DISK INFORMATION" -ForegroundColor Green
+    Write-Host "----------------------------------------------------------"
+
+    try {
+
+        $Disks = Get-CimInstance Win32_LogicalDisk `
+            -Filter "DriveType=3"
+
+        foreach ($Disk in $Disks) {
+
+            $SizeGB = [math]::Round(
+                $Disk.Size / 1GB,
+                2
+            )
+
+            $FreeGB = [math]::Round(
+                $Disk.FreeSpace / 1GB,
+                2
+            )
+
+            $UsedGB = $SizeGB - $FreeGB
+
+            $FreePercent = if ($SizeGB -gt 0) {
+
+                [math]::Round(
+                    ($FreeGB / $SizeGB) * 100,
+                    1
+                )
 
             }
+            else {
 
-        foreach ($IP in $IPAddresses) {
+                0
+            }
 
-            Write-Host ("Interface           : {0}" -f $IP.InterfaceAlias)
-            Write-Host ("IPv4 Address        : {0}" -f $IP.IPAddress)
-            Write-Host ("Prefix Length       : {0}" -f $IP.PrefixLength)
             Write-Host ""
+
+            Write-Host ("Drive               : {0}" -f $Disk.DeviceID)
+
+            Write-Host ("Volume              : {0}" -f $Disk.VolumeName)
+
+            Write-Host ("Total Size          : {0} GB" -f $SizeGB)
+
+            Write-Host ("Used                : {0} GB" -f $UsedGB)
+
+            Write-Host ("Free                : {0} GB" -f $FreeGB)
+
+            Write-Host ("Free Percentage     : {0}%" -f $FreePercent)
 
         }
 
     }
     catch {
 
-        Write-Host "Unable to retrieve network information." `
+        Write-Host "Unable to retrieve disk information." `
             -ForegroundColor Yellow
-
     }
+
+    Write-Host ""
 
 }
 
 # ============================================================
-# PING DOMAIN CONTROLLER
+# DOMAIN CONNECTIVITY TEST
 # ============================================================
 
 function Test-DomainController {
@@ -360,50 +584,61 @@ function Test-DomainController {
 
     try {
 
-        $DCResult = nltest /dsgetdc:$($Computer.Domain) 2>&1
+        $DCResult = nltest `
+            /dsgetdc:$($Computer.Domain) `
+            2>&1
 
-        $DCName = $null
+        if ($LASTEXITCODE -eq 0) {
 
-        foreach ($Line in $DCResult) {
+            $DCName = $null
 
-            if ($Line -match "\\\\([A-Za-z0-9\.\-_]+)") {
+            foreach ($Line in $DCResult) {
 
-                $DCName = $matches[1]
+                if ($Line -match "\\\\([A-Za-z0-9\.\-_]+)") {
 
-                break
+                    $DCName = $matches[1]
+
+                    break
+                }
             }
-        }
 
-        if ($DCName) {
+            if ($DCName) {
 
-            Write-Host "Domain Controller   : $DCName"
+                Write-Host ("Domain Controller    : {0}" -f $DCName)
 
-            Write-Host ""
+                Write-Host ""
 
-            Write-Host "Testing connectivity..."
+                Write-Host "Testing connectivity..."
 
-            if (Test-Connection `
-                -ComputerName $DCName `
-                -Count 2 `
-                -Quiet) {
+                if (
+                    Test-Connection `
+                        -ComputerName $DCName `
+                        -Count 2 `
+                        -Quiet
+                ) {
 
-                Write-Host "Ping                : SUCCESS" `
-                    -ForegroundColor Green
+                    Write-Host "Ping                 : SUCCESS" `
+                        -ForegroundColor Green
+
+                }
+                else {
+
+                    Write-Host "Ping                 : FAILED" `
+                        -ForegroundColor Red
+                }
 
             }
             else {
 
-                Write-Host "Ping                : FAILED" `
-                    -ForegroundColor Red
-
+                Write-Host "Unable to determine domain controller." `
+                    -ForegroundColor Yellow
             }
 
         }
         else {
 
-            Write-Host "Could not determine domain controller." `
-                -ForegroundColor Yellow
-
+            Write-Host "Unable to locate domain controller." `
+                -ForegroundColor Red
         }
 
     }
@@ -411,7 +646,6 @@ function Test-DomainController {
 
         Write-Host "Domain controller test failed." `
             -ForegroundColor Red
-
     }
 
     Write-Host ""
@@ -419,7 +653,7 @@ function Test-DomainController {
 }
 
 # ============================================================
-# GROUP POLICY INFORMATION
+# GROUP POLICY
 # ============================================================
 
 function Show-GroupPolicy {
@@ -436,7 +670,6 @@ function Show-GroupPolicy {
 
         Write-Host "Unable to retrieve Group Policy information." `
             -ForegroundColor Yellow
-
     }
 
     Write-Host ""
@@ -444,22 +677,32 @@ function Show-GroupPolicy {
 }
 
 # ============================================================
-# FULL DOMAIN REPORT
+# FULL COMPUTER REPORT
 # ============================================================
 
-function Show-FullDomainReport {
+function Show-FullReport {
 
     Show-Banner
 
-    Show-ComputerInformation
+    Show-HardwareInformation
+
     Show-DomainInformation
+
     Show-UserInformation
+
     Show-DomainController
+
     Show-SecureChannel
+
     Show-DNSInformation
+
     Show-NetworkInformation
+
+    Show-DiskInformation
+
     Test-DomainController
 
+    Write-Host ""
     Write-Host "==========================================================" `
         -ForegroundColor Cyan
 
@@ -484,7 +727,7 @@ function Show-MainMenu {
         Write-Host "==========================================================" `
             -ForegroundColor Cyan
 
-        Write-Host "                 DOMAIN INFORMATION" `
+        Write-Host "          COMPLETE COMPUTER INFORMATION" `
             -ForegroundColor Cyan
 
         Write-Host "==========================================================" `
@@ -502,24 +745,25 @@ function Show-MainMenu {
         else {
 
             Write-Host ("Workgroup: {0}" -f $Computer.Workgroup)
-
         }
 
         Write-Host ("User     : {0}\{1}" -f $env:USERDOMAIN, $env:USERNAME)
 
         Write-Host ""
 
-        Write-Host "1  Full Domain Report"
-        Write-Host "2  Computer Information"
-        Write-Host "3  Domain Information"
-        Write-Host "4  User Information"
-        Write-Host "5  Domain Controller"
-        Write-Host "6  Test Secure Channel"
-        Write-Host "7  DNS Information"
-        Write-Host "8  Network Information"
-        Write-Host "9  Test Domain Controller"
-        Write-Host "10 Group Policy Information"
-        Write-Host "11 Exit"
+        Write-Host "1  Complete Computer Report"
+        Write-Host "2  Hardware Information"
+        Write-Host "3  Windows Information"
+        Write-Host "4  Domain Information"
+        Write-Host "5  User Information"
+        Write-Host "6  Domain Controller"
+        Write-Host "7  Test Secure Channel"
+        Write-Host "8  DNS Information"
+        Write-Host "9  Network Information"
+        Write-Host "10 Disk Information"
+        Write-Host "11 Test Domain Connectivity"
+        Write-Host "12 Group Policy Information"
+        Write-Host "13 Exit"
 
         Write-Host ""
 
@@ -529,69 +773,125 @@ function Show-MainMenu {
 
             "1" {
 
-                Show-FullDomainReport
+                Show-FullReport
             }
 
             "2" {
 
                 Clear-Host
-                Show-ComputerInformation
+
+                Show-Banner
+
+                Show-HardwareInformation
+
                 Pause
             }
 
             "3" {
 
                 Clear-Host
-                Show-DomainInformation
+
+                Show-Banner
+
+                $OS = Get-CimInstance Win32_OperatingSystem
+
+                $Registry = Get-ItemProperty `
+                    "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+
+                Write-Host "WINDOWS INFORMATION" -ForegroundColor Green
+                Write-Host "----------------------------------------------------------"
+
+                Write-Host ("Windows             : {0}" -f $OS.Caption)
+
+                Write-Host ("Display Version     : {0}" -f $Registry.DisplayVersion)
+
+                Write-Host ("Build               : {0}" -f $OS.BuildNumber)
+
+                Write-Host ("Architecture        : {0}" -f $OS.OSArchitecture)
+
+                Write-Host ("Install Date        : {0}" -f $OS.InstallDate)
+
+                Write-Host ("Last Boot           : {0}" -f $OS.LastBootUpTime)
+
+                Write-Host ""
+
                 Pause
             }
 
             "4" {
 
                 Clear-Host
-                Show-UserInformation
+
+                Show-Banner
+
+                Show-DomainInformation
+
                 Pause
             }
 
             "5" {
 
                 Clear-Host
-                Show-DomainController
+
+                Show-Banner
+
+                Show-UserInformation
+
                 Pause
             }
 
             "6" {
 
                 Clear-Host
-                Show-SecureChannel
+
+                Show-Banner
+
+                Show-DomainController
+
                 Pause
             }
 
             "7" {
 
                 Clear-Host
-                Show-DNSInformation
+
+                Show-Banner
+
+                Show-SecureChannel
+
                 Pause
             }
 
             "8" {
 
                 Clear-Host
-                Show-NetworkInformation
+
+                Show-Banner
+
+                Show-DNSInformation
+
                 Pause
             }
 
             "9" {
 
                 Clear-Host
-                Test-DomainController
+
+                Show-Banner
+
+                Show-NetworkInformation
+
                 Pause
             }
 
             "10" {
 
                 Clear-Host
-                Show-GroupPolicy
+
+                Show-Banner
+
+                Show-DiskInformation
+
                 Pause
             }
 
@@ -599,8 +899,30 @@ function Show-MainMenu {
 
                 Clear-Host
 
+                Show-Banner
+
+                Test-DomainController
+
+                Pause
+            }
+
+            "12" {
+
+                Clear-Host
+
+                Show-Banner
+
+                Show-GroupPolicy
+
+                Pause
+            }
+
+            "13" {
+
+                Clear-Host
+
                 Write-Host ""
-                Write-Host "Domain Information Tool Closed." `
+                Write-Host "Complete Computer Information Tool Closed." `
                     -ForegroundColor Cyan
 
                 Write-Host ""
@@ -621,7 +943,7 @@ function Show-MainMenu {
 }
 
 # ============================================================
-# START
+# START SCRIPT
 # ============================================================
 
 try {
@@ -644,7 +966,8 @@ catch {
 
     Write-Host ""
 
-    Write-Host $_.Exception.Message -ForegroundColor Yellow
+    Write-Host $_.Exception.Message `
+        -ForegroundColor Yellow
 
     Write-Host ""
 
