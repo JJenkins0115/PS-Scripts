@@ -1,4 +1,4 @@
-   Write-MaintenanceLog "Checking for Windows Updates (Zero-Prompt Mode)..." "INFO"
+   Write-Host "Checking for Windows Updates (Zero-Prompt Mode)..." "INFO"
     $ModuleName = "PSWindowsUpdate"
     
     try {
