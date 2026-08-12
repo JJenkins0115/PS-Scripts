@@ -111,9 +111,9 @@ $ColorConsole = [System.Drawing.Color]::FromArgb(
 # GITHUB URLS
 # ============================================================
 
-$GitHubApiURL = "https://api.github.com/repos/$GitHubUser/$GitHubRepository/git/trees/$GitHubBranch?recursive=1"
+$GitHubAPI = "https://api.github.com/repos/$GitHubUser/$GitHubRepo/git/trees/$GitHubBranch`?recursive=1"
 
-$GitHubRawBase = "https://raw.githubusercontent.com/$GitHubUser/$GitHubRepository/refs/heads/$GitHubBranch"
+$RawBase = "https://raw.githubusercontent.com/$GitHubUser/$GitHubRepo/$GitHubBranch"
 
 # ============================================================
 # TEMP DIRECTORY
