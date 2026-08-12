@@ -6,16 +6,21 @@
 # CONFIGURATION
 # ============================================================
 
-$GitHubUser = "JJenkins0115"
-$GitHubRepo = "PS-Scripts"
+$GitHubOwner  = "JJenkins0115"
+$GitHubRepo   = "PS-Scripts"
 $GitHubBranch = "main"
 
-# Name displayed in the application
 $ToolkitName = "Admin Toolkit"
 
-# Temporary download location
 $TempFolder = Join-Path $env:TEMP "AdminToolkit"
 
+# ============================================================
+# GITHUB URLS
+# ============================================================
+
+$GitHubAPI = "https://api.github.com/repos/$GitHubOwner/$GitHubRepo/git/trees/$GitHubBranch`?recursive=1"
+
+$RawBase = "https://raw.githubusercontent.com/$GitHubOwner/$GitHubRepo/$GitHubBranch"
 # ============================================================
 # HIDE POWERSHELL CONSOLE
 # ============================================================
