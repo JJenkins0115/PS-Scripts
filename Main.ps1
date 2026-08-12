@@ -2,275 +2,834 @@
 # PowerShell Tools - GUI Console
 # Checkbox multi-select + queued execution + dependency auto-install
 # ============================================
+
+#GitHubUser = "JJenkins0115"
+#$Repository = "PS-Scripts"
+#$Branch = "main"
+# ============================================================
+# ADMIN TOOLKIT - MAIN MENU
+# ============================================================
+
+[CmdletBinding()]
+param()
+
+# ============================================================
+# HIDE POWERSHELL CONSOLE
+# ============================================================
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class ConsoleWindow {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(
+        IntPtr hWnd,
+        int nCmdShow
+    );
+}
+"@
+
+$ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
+
+if ($ConsoleHandle -ne [IntPtr]::Zero) {
+    [ConsoleWindow]::ShowWindow($ConsoleHandle, 0)
+}
+
+# ============================================================
+# LOAD WINDOWS FORMS
+# ============================================================
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$GitHubUser = "JJenkins0115"
-$Repository = "PS-Scripts"
-$Branch = "main"
-$RawBase    = "https://raw.githubusercontent.com/$GitHubUser/$Repository/$Branch"
-$ApiUrl     = "https://api.github.com/repos/$GitHubUser/$Repository/contents"
+$ErrorActionPreference = "SilentlyContinue"
 
-# ------------------------------------------------
-# Dependency scanning / installation
-# ------------------------------------------------
-function Get-ScriptRequirements {
-    param([string]$Content)
+# ============================================================
+# COLORS
+# ============================================================
 
-    $Result = [PSCustomObject]@{
-        Modules    = @()
-        MinVersion = $null
-        NeedsAdmin = $false
-    }
+$ColorBackground = [System.Drawing.Color]::FromArgb(245,247,250)
 
-    # #Requires -Modules Foo,Bar   or   #Requires -Module Foo
-    foreach ($m in [regex]::Matches($Content, '(?im)^\s*#Requires\s+-Modules?\s+(.+)$')) {
-        $names = $m.Groups[1].Value -split ',' | ForEach-Object { $_.Trim().Trim('"', "'") }
-        $Result.Modules += $names
-    }
+$ColorHeader = [System.Drawing.Color]::FromArgb(
+    30,41,59
+)
 
-    # Fallback: plain Import-Module calls the script author didn't declare via #Requires
-    foreach ($m in [regex]::Matches($Content, '(?im)^\s*Import-Module\s+([A-Za-z0-9_.\-]+)')) {
-        $Result.Modules += $m.Groups[1].Value
-    }
+$ColorBlue = [System.Drawing.Color]::FromArgb(
+    37,99,235
+)
 
-    $Result.Modules = $Result.Modules | Sort-Object -Unique
+$ColorText = [System.Drawing.Color]::FromArgb(
+    30,41,59
+)
 
-    $verMatch = [regex]::Match($Content, '(?im)^\s*#Requires\s+-Version\s+([\d.]+)')
-    if ($verMatch.Success) { $Result.MinVersion = [version]$verMatch.Groups[1].Value }
+$ColorSubText = [System.Drawing.Color]::FromArgb(
+    100,116,139
+)
 
-    if ($Content -match '(?im)^\s*#Requires\s+-RunAsAdministrator') {
-        $Result.NeedsAdmin = $true
-    }
+$ColorWhite = [System.Drawing.Color]::White
 
-    return $Result
-}
+$ColorHover = [System.Drawing.Color]::FromArgb(
+    239,246,255
+)
 
-function Ensure-PSGalleryReady {
-    param([scriptblock]$Log)
+# ============================================================
+# SCRIPT LOCATION
+# ============================================================
 
-    if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
-        & $Log "Installing NuGet provider (required to install modules)..."
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-    }
+$ScriptRoot = Split-Path -Parent $PSCommandPath
 
-    $gallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
-    if ($gallery -and $gallery.InstallationPolicy -ne 'Trusted') {
-        & $Log "Trusting PSGallery repository..."
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    }
-}
+# ============================================================
+# GET SCRIPT DISPLAY NAME
+# ============================================================
 
-function Resolve-ScriptDependencies {
+function Get-ScriptDisplayName {
+
     param(
-        [string]$Content,
-        [scriptblock]$Log
+        [System.IO.FileInfo]$File
     )
 
-    $Req = Get-ScriptRequirements -Content $Content
+    $Name = $File.BaseName
 
-    if ($Req.MinVersion -and $PSVersionTable.PSVersion -lt $Req.MinVersion) {
-        & $Log "WARNING: script requires PowerShell $($Req.MinVersion)+ (you have $($PSVersionTable.PSVersion)). Cannot auto-upgrade PowerShell; the script may fail."
-    }
+    # Remove common prefixes
+    $Name = $Name -replace '^[0-9]+[-_ ]*',''
 
-    if ($Req.NeedsAdmin) {
-        & $Log "Note: script declares it needs to run as Administrator (it will be launched elevated)."
-    }
+    # Add spaces between CamelCase words
+    $Name = $Name -replace '([a-z])([A-Z])','$1 $2'
 
-    if ($Req.Modules.Count -gt 0) {
-        Ensure-PSGalleryReady -Log $Log
-    }
+    # Replace separators
+    $Name = $Name -replace '[_-]',' '
 
-    foreach ($mod in $Req.Modules) {
-        if (Get-Module -ListAvailable -Name $mod -ErrorAction SilentlyContinue) {
-            & $Log "Module '$mod' already installed."
+    return $Name.Trim()
+}
+
+# ============================================================
+# GET SCRIPT CATEGORIES
+# ============================================================
+
+function Get-ScriptCategories {
+
+    $Categories = @()
+
+    # --------------------------------------------------------
+    # Look through directories
+    # --------------------------------------------------------
+
+    $Folders = Get-ChildItem `
+        -Path $ScriptRoot `
+        -Directory `
+        -ErrorAction SilentlyContinue |
+        Sort-Object Name
+
+    foreach ($Folder in $Folders) {
+
+        # Don't treat hidden/system folders as categories
+        if ($Folder.Name.StartsWith(".")) {
             continue
         }
-        & $Log "Module '$mod' is missing - installing..."
-        try {
-            Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-            & $Log "Installed '$mod'."
-        }
-        catch {
-            & $Log "ERROR: could not install '$mod' - $($_.Exception.Message)"
+
+        $Scripts = Get-ChildItem `
+            -Path $Folder.FullName `
+            -Filter "*.ps1" `
+            -File `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.Name -ne "main.ps1"
+            } |
+            Sort-Object Name
+
+        if ($Scripts.Count -gt 0) {
+
+            $Categories += [PSCustomObject]@{
+                Name    = $Folder.Name
+                Scripts = @($Scripts)
+            }
         }
     }
 
-    if ($Req.Modules.Count -eq 0 -and -not $Req.MinVersion -and -not $Req.NeedsAdmin) {
-        & $Log "No declared requirements found (nothing to install)."
+    # --------------------------------------------------------
+    # Scripts directly in repository root
+    # --------------------------------------------------------
+
+    $RootScripts = Get-ChildItem `
+        -Path $ScriptRoot `
+        -Filter "*.ps1" `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -ne "main.ps1"
+        } |
+        Sort-Object Name
+
+    if ($RootScripts.Count -gt 0) {
+
+        $Categories = @(
+            [PSCustomObject]@{
+                Name    = "General"
+                Scripts = @($RootScripts)
+            }
+        ) + $Categories
     }
+
+    return $Categories
 }
 
-# ------------------------------------------------
-# GUI
-# ------------------------------------------------
-$Form = New-Object System.Windows.Forms.Form
-$Form.Text = "PowerShell Tools Console"
-$Form.Size = New-Object System.Drawing.Size(560, 640)
-$Form.StartPosition = "CenterScreen"
-$Form.FormBorderStyle = 'FixedDialog'
-$Form.MaximizeBox = $false
+# ============================================================
+# LAUNCH SCRIPT
+# ============================================================
 
-$Label = New-Object System.Windows.Forms.Label
-$Label.Text = "Select scripts to queue:"
-$Label.Location = New-Object System.Drawing.Point(15, 15)
-$Label.AutoSize = $true
-$Form.Controls.Add($Label)
+function Start-ToolScript {
 
-$CheckedList = New-Object System.Windows.Forms.CheckedListBox
-$CheckedList.Location = New-Object System.Drawing.Point(15, 40)
-$CheckedList.Size = New-Object System.Drawing.Size(510, 220)
-$CheckedList.CheckOnClick = $true
-$Form.Controls.Add($CheckedList)
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
 
-$RefreshBtn = New-Object System.Windows.Forms.Button
-$RefreshBtn.Text = "Refresh List"
-$RefreshBtn.Location = New-Object System.Drawing.Point(15, 270)
-$RefreshBtn.Size = New-Object System.Drawing.Size(115, 30)
-$Form.Controls.Add($RefreshBtn)
+    if (!(Test-Path $Path)) {
 
-$SelectAllBtn = New-Object System.Windows.Forms.Button
-$SelectAllBtn.Text = "Select All"
-$SelectAllBtn.Location = New-Object System.Drawing.Point(140, 270)
-$SelectAllBtn.Size = New-Object System.Drawing.Size(90, 30)
-$Form.Controls.Add($SelectAllBtn)
-
-$ClearBtn = New-Object System.Windows.Forms.Button
-$ClearBtn.Text = "Clear"
-$ClearBtn.Location = New-Object System.Drawing.Point(240, 270)
-$ClearBtn.Size = New-Object System.Drawing.Size(90, 30)
-$Form.Controls.Add($ClearBtn)
-
-$RunBtn = New-Object System.Windows.Forms.Button
-$RunBtn.Text = "Run Queue"
-$RunBtn.Location = New-Object System.Drawing.Point(345, 270)
-$RunBtn.Size = New-Object System.Drawing.Size(180, 30)
-$RunBtn.BackColor = [System.Drawing.Color]::LightGreen
-$Form.Controls.Add($RunBtn)
-
-$LogLabel = New-Object System.Windows.Forms.Label
-$LogLabel.Text = "Log:"
-$LogLabel.Location = New-Object System.Drawing.Point(15, 310)
-$LogLabel.AutoSize = $true
-$Form.Controls.Add($LogLabel)
-
-$LogBox = New-Object System.Windows.Forms.TextBox
-$LogBox.Location = New-Object System.Drawing.Point(15, 335)
-$LogBox.Size = New-Object System.Drawing.Size(510, 240)
-$LogBox.Multiline = $true
-$LogBox.ScrollBars = "Vertical"
-$LogBox.ReadOnly = $true
-$LogBox.Font = New-Object System.Drawing.Font("Consolas", 9)
-$Form.Controls.Add($LogBox)
-
-$StatusLabel = New-Object System.Windows.Forms.Label
-$StatusLabel.Text = "Ready."
-$StatusLabel.Location = New-Object System.Drawing.Point(15, 585)
-$StatusLabel.AutoSize = $true
-$Form.Controls.Add($StatusLabel)
-
-function Write-Log {
-    param([string]$Message)
-    $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $Message
-    $LogBox.AppendText("$line`r`n")
-    [System.Windows.Forms.Application]::DoEvents()
-}
-
-$Global:ScriptObjects = @()
-
-function Load-ScriptList {
-    $CheckedList.Items.Clear()
-    $StatusLabel.Text = "Fetching script list..."
-    [System.Windows.Forms.Application]::DoEvents()
-    try {
-        $Files = Invoke-RestMethod -Uri $ApiUrl -ErrorAction Stop
-        $Global:ScriptObjects = @(
-            $Files | Where-Object {
-                $_.type -eq "file" -and $_.name -like "*.ps1" -and $_.name -ne "Main.ps1" -and $_.name -ne "Main-GUI.ps1"
-            } | Sort-Object name
+        [System.Windows.Forms.MessageBox]::Show(
+            "The script could not be found:`r`n`r`n$Path",
+            "Script Not Found",
+            "OK",
+            "Error"
         )
-        foreach ($s in $Global:ScriptObjects) {
-            $CheckedList.Items.Add($s.name) | Out-Null
-        }
-        $StatusLabel.Text = "Loaded $($Global:ScriptObjects.Count) script(s)."
-    }
-    catch {
-        [System.Windows.Forms.MessageBox]::Show("Unable to retrieve scripts: $($_.Exception.Message)", "Error", "OK", "Error") | Out-Null
-        $StatusLabel.Text = "Failed to load scripts."
-    }
-}
 
-$RefreshBtn.Add_Click({ Load-ScriptList })
-
-$SelectAllBtn.Add_Click({
-    for ($i = 0; $i -lt $CheckedList.Items.Count; $i++) { $CheckedList.SetItemChecked($i, $true) }
-})
-
-$ClearBtn.Add_Click({
-    for ($i = 0; $i -lt $CheckedList.Items.Count; $i++) { $CheckedList.SetItemChecked($i, $false) }
-})
-
-$RunBtn.Add_Click({
-    $selectedNames = $CheckedList.CheckedItems | ForEach-Object { $_.ToString() }
-    if ($selectedNames.Count -eq 0) {
-        [System.Windows.Forms.MessageBox]::Show("Select at least one script first.", "Nothing selected", "OK", "Warning") | Out-Null
         return
     }
 
-    $Queue = foreach ($n in $selectedNames) {
-        $Global:ScriptObjects | Where-Object { $_.name -eq $n }
-    }
+    # --------------------------------------------------------
+    # Confirm launch
+    # --------------------------------------------------------
 
-    $confirm = [System.Windows.Forms.MessageBox]::Show(
-        "Run $($Queue.Count) script(s) in order? Each will download, have its dependencies checked/installed, then run elevated. The queue waits for each one to close before starting the next.",
-        "Confirm queue",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Question
+    $ScriptName = Split-Path $Path -Leaf
+
+    $Result = [System.Windows.Forms.MessageBox]::Show(
+        "Run the following script?`r`n`r`n$ScriptName",
+        "Run Script",
+        "YesNo",
+        "Question"
     )
-    if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) { return }
 
-    $RunBtn.Enabled = $false
-    $RefreshBtn.Enabled = $false
-    $StatusLabel.Text = "Running queue..."
-    $LogBox.Clear()
-
-    foreach ($item in $Queue) {
-        Write-Log "==== $($item.name) ===="
-
-        $ScriptUrl = "$RawBase/$($item.name)"
-        $TempFile  = Join-Path $env:TEMP $item.name
-
-        Write-Log "Downloading..."
-        try {
-            Invoke-WebRequest -Uri $ScriptUrl -OutFile $TempFile -UseBasicParsing -ErrorAction Stop
-        }
-        catch {
-            Write-Log "ERROR downloading: $($_.Exception.Message) - skipping this script."
-            continue
-        }
-
-        $Content = Get-Content -Path $TempFile -Raw
-        Write-Log "Checking required modules / PowerShell version..."
-        Resolve-ScriptDependencies -Content $Content -Log { param($m) Write-Log $m }
-
-        Write-Log "Launching elevated, waiting for it to close..."
-        try {
-            Start-Process powershell.exe `
-                -Verb RunAs `
-                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$TempFile`"" `
-                -Wait
-            Write-Log "Finished $($item.name)."
-        }
-        catch {
-            Write-Log "ERROR launching: $($_.Exception.Message)"
-        }
+    if ($Result -ne "Yes") {
+        return
     }
 
-    Write-Log "Queue complete."
-    $StatusLabel.Text = "Queue complete. Ready."
-    $RunBtn.Enabled = $true
-    $RefreshBtn.Enabled = $true
+    # --------------------------------------------------------
+    # Launch elevated PowerShell
+    # --------------------------------------------------------
+
+    try {
+
+        Start-Process `
+            -FilePath "powershell.exe" `
+            -Verb RunAs `
+            -ArgumentList @(
+                "-NoProfile"
+                "-ExecutionPolicy"
+                "Bypass"
+                "-File"
+                "`"$Path`""
+            )
+
+    }
+    catch {
+
+        [System.Windows.Forms.MessageBox]::Show(
+            "Unable to start the script.`r`n`r`n$($_.Exception.Message)",
+            "Launch Error",
+            "OK",
+            "Error"
+        )
+    }
+}
+
+# ============================================================
+# CREATE SCRIPT BUTTON
+# ============================================================
+
+function Add-ScriptButton {
+
+    param(
+        [System.Windows.Forms.Panel]$Parent,
+        [System.IO.FileInfo]$Script
+    )
+
+    $Button = New-Object System.Windows.Forms.Button
+
+    $Button.Text = "    $(
+        Get-ScriptDisplayName $Script
+    )"
+
+    $Button.Width = 700
+
+    $Button.Height = 42
+
+    $Button.Margin = New-Object `
+        System.Windows.Forms.Padding(
+            20,
+            2,
+            20,
+            2
+        )
+
+    $Button.FlatStyle = "Flat"
+
+    $Button.FlatAppearance.BorderSize = 0
+
+    $Button.BackColor = $ColorWhite
+
+    $Button.ForeColor = $ColorText
+
+    $Button.Font = New-Object `
+        System.Drawing.Font(
+            "Segoe UI",
+            10
+        )
+
+    $Button.TextAlign = "MiddleLeft"
+
+    $Button.Cursor =
+        [System.Windows.Forms.Cursors]::Hand
+
+    $Button.Tag = $Script.FullName
+
+    # --------------------------------------------------------
+    # Hover
+    # --------------------------------------------------------
+
+    $Button.Add_MouseEnter({
+
+        $this.BackColor = $ColorHover
+        $this.ForeColor = $ColorBlue
+
+    })
+
+    $Button.Add_MouseLeave({
+
+        $this.BackColor = $ColorWhite
+        $this.ForeColor = $ColorText
+
+    })
+
+    # --------------------------------------------------------
+    # Click
+    # --------------------------------------------------------
+
+    $Button.Add_Click({
+
+        Start-ToolScript `
+            -Path $this.Tag
+
+    })
+
+    $Parent.Controls.Add($Button)
+}
+
+# ============================================================
+# CREATE DROPDOWN CATEGORY
+# ============================================================
+
+function Add-Category {
+
+    param(
+        [System.Windows.Forms.FlowLayoutPanel]$Parent,
+        [string]$Title,
+        [array]$Scripts
+    )
+
+    # --------------------------------------------------------
+    # Category container
+    # --------------------------------------------------------
+
+    $Panel = New-Object `
+        System.Windows.Forms.Panel
+
+    $Panel.Width = 740
+
+    $Panel.Height = 50
+
+    $Panel.Margin = New-Object `
+        System.Windows.Forms.Padding(
+            0,
+            0,
+            0,
+            8
+        )
+
+    $Panel.BackColor = $ColorWhite
+
+    # --------------------------------------------------------
+    # Category button
+    # --------------------------------------------------------
+
+    $Button = New-Object `
+        System.Windows.Forms.Button
+
+    $Button.Text = "+  $Title"
+
+    $Button.Width = 720
+
+    $Button.Height = 44
+
+    $Button.Location = New-Object `
+        System.Drawing.Point(
+            10,
+            3
+        )
+
+    $Button.FlatStyle = "Flat"
+
+    $Button.FlatAppearance.BorderSize = 0
+
+    $Button.BackColor = $ColorWhite
+
+    $Button.ForeColor = $ColorText
+
+    $Button.Font = New-Object `
+        System.Drawing.Font(
+            "Segoe UI Semibold",
+            11
+        )
+
+    $Button.TextAlign = "MiddleLeft"
+
+    $Button.Cursor =
+        [System.Windows.Forms.Cursors]::Hand
+
+    # --------------------------------------------------------
+    # Script container
+    # --------------------------------------------------------
+
+    $ScriptPanel = New-Object `
+        System.Windows.Forms.FlowLayoutPanel
+
+    $ScriptPanel.FlowDirection =
+        "TopDown"
+
+    $ScriptPanel.WrapContents = $false
+
+    $ScriptPanel.AutoSize = $true
+
+    $ScriptPanel.AutoSizeMode =
+        "GrowAndShrink"
+
+    $ScriptPanel.Location = New-Object `
+        System.Drawing.Point(
+            10,
+            48
+        )
+
+    $ScriptPanel.Width = 720
+
+    $ScriptPanel.Visible = $false
+
+    $ScriptPanel.BackColor = $ColorWhite
+
+    # --------------------------------------------------------
+    # Add scripts
+    # --------------------------------------------------------
+
+    foreach ($Script in $Scripts) {
+
+        Add-ScriptButton `
+            -Parent $ScriptPanel `
+            -Script $Script
+    }
+
+    # --------------------------------------------------------
+    # Store references
+    # --------------------------------------------------------
+
+    $Button.Tag = @{
+        Panel  = $Panel
+        Scripts = $ScriptPanel
+        Title  = $Title
+    }
+
+    # --------------------------------------------------------
+    # Add controls
+    # --------------------------------------------------------
+
+    $Panel.Controls.Add($Button)
+
+    $Panel.Controls.Add($ScriptPanel)
+
+    # --------------------------------------------------------
+    # Click category
+    # --------------------------------------------------------
+
+    $Button.Add_Click({
+
+        $Data = $this.Tag
+
+        $CategoryPanel = $Data.Panel
+
+        $ScriptsPanel = $Data.Scripts
+
+        $CategoryTitle = $Data.Title
+
+        if (!$ScriptsPanel.Visible) {
+
+            # ------------------------------------------------
+            # OPEN
+            # ------------------------------------------------
+
+            $ScriptsPanel.Visible = $true
+
+            $ScriptCount = $ScriptsPanel.Controls.Count
+
+            $CategoryPanel.Height =
+                55 + ($ScriptCount * 46)
+
+            $this.Text =
+                "-  $CategoryTitle"
+
+        }
+        else {
+
+            # ------------------------------------------------
+            # CLOSE
+            # ------------------------------------------------
+
+            $ScriptsPanel.Visible = $false
+
+            $CategoryPanel.Height = 50
+
+            $this.Text =
+                "+  $CategoryTitle"
+        }
+
+        $Parent.PerformLayout()
+
+        $Parent.Refresh()
+    })
+
+    $Parent.Controls.Add($Panel)
+}
+
+# ============================================================
+# MAIN FORM
+# ============================================================
+
+$Form = New-Object `
+    System.Windows.Forms.Form
+
+$Form.Text = "Admin Toolkit"
+
+$Form.Size = New-Object `
+    System.Drawing.Size(
+        850,
+        850
+    )
+
+$Form.MinimumSize = New-Object `
+    System.Drawing.Size(
+        700,
+        700
+    )
+
+$Form.StartPosition = "CenterScreen"
+
+$Form.BackColor = $ColorBackground
+
+# ============================================================
+# HEADER
+# ============================================================
+
+$Header = New-Object `
+    System.Windows.Forms.Panel
+
+$Header.Dock = "Top"
+
+$Header.Height = 140
+
+$Header.BackColor = $ColorHeader
+
+$Form.Controls.Add($Header)
+
+# ============================================================
+# TITLE
+# ============================================================
+
+$TitleLabel = New-Object `
+    System.Windows.Forms.Label
+
+$TitleLabel.Text = "ADMIN TOOLKIT"
+
+$TitleLabel.Location = New-Object `
+    System.Drawing.Point(
+        30,
+        20
+    )
+
+$TitleLabel.AutoSize = $true
+
+$TitleLabel.ForeColor = $ColorWhite
+
+$TitleLabel.Font = New-Object `
+    System.Drawing.Font(
+        "Segoe UI Semibold",
+        24
+    )
+
+$Header.Controls.Add($TitleLabel)
+
+# ============================================================
+# SUBTITLE
+# ============================================================
+
+$SubtitleLabel = New-Object `
+    System.Windows.Forms.Label
+
+$SubtitleLabel.Text =
+    "Select a category and choose a tool"
+
+$SubtitleLabel.Location = New-Object `
+    System.Drawing.Point(
+        32,
+        62
+    )
+
+$SubtitleLabel.AutoSize = $true
+
+$SubtitleLabel.ForeColor =
+    [System.Drawing.Color]::FromArgb(
+        148,
+        163,
+        184
+    )
+
+$SubtitleLabel.Font = New-Object `
+    System.Drawing.Font(
+        "Segoe UI",
+        10
+    )
+
+$Header.Controls.Add($SubtitleLabel)
+
+# ============================================================
+# REPOSITORY PATH
+# ============================================================
+
+$PathLabel = New-Object `
+    System.Windows.Forms.Label
+
+$PathLabel.Text =
+    "Toolkit: $ScriptRoot"
+
+$PathLabel.Location = New-Object `
+    System.Drawing.Point(
+        32,
+        95
+    )
+
+$PathLabel.AutoSize = $true
+
+$PathLabel.ForeColor =
+    [System.Drawing.Color]::FromArgb(
+        148,
+        163,
+        184
+    )
+
+$PathLabel.Font = New-Object `
+    System.Drawing.Font(
+        "Segoe UI",
+        8
+    )
+
+$Header.Controls.Add($PathLabel)
+
+# ============================================================
+# REFRESH BUTTON
+# ============================================================
+
+$RefreshButton = New-Object `
+    System.Windows.Forms.Button
+
+$RefreshButton.Text = "Refresh"
+
+$RefreshButton.Width = 100
+
+$RefreshButton.Height = 35
+
+$RefreshButton.Location = New-Object `
+    System.Drawing.Point(
+        720,
+        20
+    )
+
+$RefreshButton.FlatStyle = "Flat"
+
+$RefreshButton.FlatAppearance.BorderSize = 0
+
+$RefreshButton.BackColor = $ColorBlue
+
+$RefreshButton.ForeColor = $ColorWhite
+
+$RefreshButton.Font = New-Object `
+    System.Drawing.Font(
+        "Segoe UI Semibold",
+        9
+    )
+
+$RefreshButton.Cursor =
+    [System.Windows.Forms.Cursors]::Hand
+
+$Header.Controls.Add($RefreshButton)
+
+# ============================================================
+# SCROLL AREA
+# ============================================================
+
+$ScrollPanel = New-Object `
+    System.Windows.Forms.Panel
+
+$ScrollPanel.Dock = "Fill"
+
+$ScrollPanel.AutoScroll = $true
+
+$ScrollPanel.Padding = New-Object `
+    System.Windows.Forms.Padding(
+        25,
+        20,
+        25,
+        20
+    )
+
+$ScrollPanel.BackColor = $ColorBackground
+
+$Form.Controls.Add($ScrollPanel)
+
+$ScrollPanel.BringToFront()
+
+# ============================================================
+# FLOW LAYOUT
+# ============================================================
+
+$Sections = New-Object `
+    System.Windows.Forms.FlowLayoutPanel
+
+$Sections.FlowDirection = "TopDown"
+
+$Sections.WrapContents = $false
+
+$Sections.AutoSize = $true
+
+$Sections.AutoSizeMode =
+    "GrowAndShrink"
+
+$Sections.Dock = "Top"
+
+$Sections.BackColor = $ColorBackground
+
+$ScrollPanel.Controls.Add($Sections)
+
+# ============================================================
+# LOAD SCRIPTS
+# ============================================================
+
+function Load-Scripts {
+
+    $RefreshButton.Enabled = $false
+
+    $RefreshButton.Text = "Loading..."
+
+    try {
+
+        $Sections.SuspendLayout()
+
+        $Sections.Controls.Clear()
+
+        # ----------------------------------------------------
+        # Find categories
+        # ----------------------------------------------------
+
+        $Categories = Get-ScriptCategories
+
+        # ----------------------------------------------------
+        # No scripts
+        # ----------------------------------------------------
+
+        if ($Categories.Count -eq 0) {
+
+            $Label = New-Object `
+                System.Windows.Forms.Label
+
+            $Label.Text =
+                "No PowerShell scripts were found."
+
+            $Label.AutoSize = $true
+
+            $Label.Font = New-Object `
+                System.Drawing.Font(
+                    "Segoe UI",
+                    11
+                )
+
+            $Label.ForeColor = $ColorSubText
+
+            $Sections.Controls.Add($Label)
+
+        }
+
+        # ----------------------------------------------------
+        # Add categories
+        # ----------------------------------------------------
+
+        foreach ($Category in $Categories) {
+
+            Add-Category `
+                -Parent $Sections `
+                -Title $Category.Name `
+                -Scripts $Category.Scripts
+        }
+
+    }
+    catch {
+
+        [System.Windows.Forms.MessageBox]::Show(
+            "Unable to load scripts.`r`n`r`n$($_.Exception.Message)",
+            "Admin Toolkit",
+            "OK",
+            "Error"
+        )
+    }
+    finally {
+
+        $Sections.ResumeLayout()
+
+        $RefreshButton.Enabled = $true
+
+        $RefreshButton.Text = "Refresh"
+    }
+}
+
+# ============================================================
+# REFRESH
+# ============================================================
+
+$RefreshButton.Add_Click({
+
+    Load-Scripts
+
 })
 
-Load-ScriptList
+# ============================================================
+# FORM LOAD
+# ============================================================
+
+$Form.Add_Shown({
+
+    Load-Scripts
+
+})
+
+# ============================================================
+# RUN APPLICATION
+# ============================================================
+
 [void]$Form.ShowDialog()
