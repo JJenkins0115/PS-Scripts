@@ -1,11 +1,4 @@
-# ============================================
-# PowerShell Tools - GUI Console
-# Checkbox multi-select + queued execution + dependency auto-install
-# ============================================
 
-$GitHubUser = "JJenkins0115"
-$Repository = "PS-Scripts"
-$Branch = "main"
 # ============================================================
 # ADMIN TOOLKIT - MAIN MENU
 # ============================================================
