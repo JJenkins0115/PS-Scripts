@@ -1,4 +1,41 @@
- Write-host "Starting Driver Store and System Maintenance Tasks..." "INFO"
+# ================================================================
+# Script Name:   MasterCleanScript.ps1
+# Path:          Tools/MasterCleanScript.ps1
+# Description:   System Clean & Diagnostic Script (GitHub Driver Store Engine)
+# ================================================================
+
+Set-StrictMode -Version 3.0
+$ErrorActionPreference = 'Stop'
+
+$scriptStart = Get-Date 
+$Global:ExecutionReport = [System.Collections.Generic.List[PSObject]]::new()
+$Global:StopRequested = $false
+
+function Invoke-MaintenanceTask {
+    param([string]$Name, [ScriptBlock]$Task)
+
+    if ($Global:StopRequested) {
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="SKIPPED" })
+        return
+    }
+
+    Write-Host "Executing: $Name" "INFO"
+    try {
+        & $Task
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="COMPLETED" })
+    } catch {
+        Write-Host "Error in $Name : $($_.Exception.Message)" "ERROR"
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="FAILED" })
+    }
+
+}
+
+# ------------------------------------------------------------
+# CLEANUP & DIAGNOSTIC FUNCTIONS
+# ------------------------------------------------------------
+
+function Start-DSOrphanedFiles {
+    Write-host "Starting Driver Store and System Maintenance Tasks..." "INFO"
     
     # Configure GitHub release asset parameters inside temporary workspace
     $downloadUrl = "https://github.com/lostindark/DriverStoreExplorer/releases/download/v0.12.64/DriverStoreExplorer.v0.12.64.zip"
@@ -53,5 +90,92 @@
     finally {
         if (Test-Path $zipPath) { Remove-Item $zipPath -Force -ErrorAction SilentlyContinue }
         if (Test-Path $extractPath) { Remove-Item $extractPath -Recurse -Force -ErrorAction SilentlyContinue }
-    }    
+    }
 }
+
+function Get-BatteryHealth {
+    Write-host "Analyzing Battery Health..." "INFO"
+    $xmlPath = Join-Path -Path $env:TEMP -ChildPath "bat_report.xml"
+    
+    try {
+        $batCheck = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
+        if (-not $batCheck) {
+            Write-host "No battery detected (Desktop System)." "INFO"
+            return
+        }
+
+        powercfg /batteryreport /output $xmlPath /xml | Out-Null
+
+        if (Test-Path $xmlPath) {
+            [xml]$xmlReport = Get-Content $xmlPath
+            $designCap = $xmlReport.BatteryReport.Batteries.Battery.DesignCapacity | Select-Object -First 1
+            $fullCap   = $xmlReport.BatteryReport.Batteries.Battery.FullChargeCapacity | Select-Object -First 1
+
+            if ($designCap -and $fullCap -and $designCap -gt 0) {
+                $health = [math]::Round(($fullCap / $designCap) * 100, 1)
+                $statusColor = if ($health -ge 80) { "SUCCESS" } elseif ($health -ge 50) { "WARN" } else { "ERROR" }
+
+                Write-host "Battery Model: $($batCheck.Name)" "INFO"
+                Write-host "Battery Health: $health% ($fullCap mWh / $designCap mWh)" $statusColor
+            }
+        }
+    } 
+    catch {
+        Write-host "Battery Analysis Error: $($_.Exception.Message)" "ERROR"
+    } 
+    finally {
+        if (Test-Path $xmlPath) { Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function AdditionalClean {
+    Write-host "Disabling Hibernation to reclaim system storage..." "INFO"
+    powercfg /hibernate off
+}
+
+function Start-ManualDiskCleanup {
+    Write-host "Cleaning System Cache and Application remnants..." "INFO"
+    $Targets = @(
+        "C:\Windows\Panther\*", "C:\Windows\inf\*.log", "C:\Windows\Logs\*",
+        "C:\ProgramData\Microsoft\Windows\WER\*", "$env:LOCALAPPDATA\Microsoft\Windows\WER\*",
+        "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\thumbcache_*.db",
+        "C:\Windows\ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization\Cache\*",
+        "$env:LOCALAPPDATA\Local\Microsoft\Edge\User Data\Default\Cache\*",
+        "C:\`$Recycle.Bin\*"
+    )
+    foreach ($Path in $Targets) {
+        Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Start-ExcessCleanup {
+    $Services = @("bits", "dosvc")
+    $Services | ForEach-Object { Stop-Service $_ -Force -ErrorAction SilentlyContinue }
+    $Folders = @("$env:TEMP", "C:\Windows\Temp", "C:\Windows\Prefetch", "C:\Windows\SoftwareDistribution\Download")
+    foreach ($f in $Folders) {
+        if (Test-Path $f) { Get-ChildItem -Path "$f\*" -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force }
+    }
+    Start-Service "wuauserv" -ErrorAction SilentlyContinue
+}
+
+# ------------------------------------------------------------
+# MAIN EXECUTION ENGINE
+# ------------------------------------------------------------
+Clear-Host
+$computerName = $env:COMPUTERNAME
+$compSys = Get-CimInstance Win32_ComputerSystem
+$bios    = Get-CimInstance Win32_Bios
+$os      = Get-CimInstance Win32_OperatingSystem
+
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host " Master Maintenance Script Execution" -ForegroundColor White
+Write-Host " Model:    $($compSys.Model)" -ForegroundColor Gray
+Write-Host " S/N:      $($bios.SerialNumber)" -ForegroundColor Gray
+Write-Host " OS:       $($os.Caption) Build $($os.BuildNumber)" -ForegroundColor Gray
+Write-Host "==========================================" -ForegroundColor Cyan
+
+Invoke-MaintenanceTask "Battery Health Report"                 { Get-BatteryHealth }
+Invoke-MaintenanceTask "Hibernation & Storage Fix"             { AdditionalClean }
+Invoke-MaintenanceTask "Orphaned Files & Driver Store"         { Start-DSOrphanedFiles }
+Invoke-MaintenanceTask "Manual Disk Cache Purge"               { Start-ManualDiskCleanup }
+Invoke-MaintenanceTask "Temp Files & Service Cache Purge"      { Start-ExcessCleanup }
