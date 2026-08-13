@@ -1,173 +1,93 @@
 # ============================================================
 # Script:        ChangeName.ps1
-# Description:   Renames the local computer with robust validation.
-# Compatibility: PowerShell 5.1+ / Core, Visual Studio Code, Embedded UI
+# Description:   Interactive NetBIOS Computer Name Change Utility
+# Compatibility: Native PowerShell Terminal, PowerShell 5.1+ / Core
 # ============================================================
 
-[CmdletBinding()]
-param(
-    # Target NetBIOS computer name (1-15 characters)
-    [Parameter(Mandatory = $false, Position = 0)]
-    [ValidateNotNullOrEmpty()]
-    [string]$NewName,
+# Check for elevated Administrator privileges
+$Identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+$Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
 
-    # Forces system restart immediately after successful rename
-    [Parameter(Mandatory = $false)]
-    [switch]$Restart
-)
+if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "[!] Privilege Check Failed: Administrator rights required." -ForegroundColor Yellow
+    Write-Host "[>] Requesting elevated process context..." -ForegroundColor Yellow
 
-# Set strict execution standards for clean error tracing in VS Code
-Set-StrictMode -Version 3.0
+    Start-Process powershell.exe `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" `
+        -Verb RunAs
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-function Test-IsAdministrator {
-    <#
-        .SYNOPSIS
-        Evaluates whether the current execution thread runs with elevated security rights.
-        Why: Prevents invoking privileged registry/WMI operations when UAC elevation is absent.
-    #>
-    $Identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $Principal = [Security.Principal.WindowsPrincipal]$Identity
-    return $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    exit
 }
 
-function Show-InputModal {
-    <#
-        .SYNOPSIS
-        Displays a self-contained modal prompt optimized for background task calls.
-        Why: Replaces Read-Host and VisualBasic InputBox to prevent thread hanging in embedded UIs.
-    #>
-    param(
-        [string]$PromptText,
-        [string]$WindowTitle
-    )
+Clear-Host
 
-    Add-Type -AssemblyName System.Windows.Forms
-    Add-Type -AssemblyName System.Drawing
-
-    $Form = New-Object System.Windows.Forms.Form -Property @{
-        Text            = $WindowTitle
-        Size            = New-Object System.Drawing.Size(400, 180)
-        StartPosition   = 'CenterScreen'
-        FormBorderStyle = 'FixedDialog'
-        MaximizeBox     = $false
-        MinimizeBox     = $false
-        TopMost         = $true
-    }
-
-    $Label = New-Object System.Windows.Forms.Label -Property @{
-        Location = New-Object System.Drawing.Point(15, 15)
-        Size     = New-Object System.Drawing.Size(350, 30)
-        Text     = $PromptText
-    }
-
-    $TextBox = New-Object System.Windows.Forms.TextBox -Property @{
-        Location = New-Object System.Drawing.Point(15, 50)
-        Size     = New-Object System.Drawing.Size(355, 25)
-    }
-
-    $OKButton = New-Object System.Windows.Forms.Button -Property @{
-        Location     = New-Object System.Drawing.Point(190, 90)
-        Size         = New-Object System.Drawing.Size(85, 30)
-        Text         = 'OK'
-        DialogResult = [System.Windows.Forms.DialogResult]::OK
-    }
-
-    $CancelButton = New-Object System.Windows.Forms.Button -Property @{
-        Location     = New-Object System.Drawing.Point(285, 90)
-        Size         = New-Object System.Drawing.Size(85, 30)
-        Text         = 'Cancel'
-        DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    }
-
-    $Form.Controls.AddRange(@($Label, $TextBox, $OKButton, $CancelButton))
-    $Form.AcceptButton = $OKButton
-    $Form.CancelButton = $CancelButton
-
-    # Activate form and keep it focused
-    $Form.Add_Shown({ $Form.Activate(); $TextBox.Focus() })
-
-    $Result = $Form.ShowDialog()
-
-    if ($Result -eq [System.Windows.Forms.DialogResult]::OK) {
-        return $TextBox.Text
-    }
-    return $null
-}
-
-# ============================================================
-# MAIN EXECUTION PIPELINE
-# ============================================================
-
-Write-Output "============================================================"
-Write-Output "               Change Computer Name Utility                 "
-Write-Output "============================================================"
-
-# Privilege Verification
-if (-not (Test-IsAdministrator)) {
-    Write-Error "[!] Error: Administrator privileges are required."
-    Write-Warning "[!] Relaunch the parent host application as Administrator."
-    return
-}
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "               Change Computer Name Utility                 " -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
 
 $CurrentName = $env:COMPUTERNAME
-Write-Output "[>] Current Computer Name: $CurrentName"
+Write-Host "[>] Current Computer Name: $CurrentName" -ForegroundColor Gray
+Write-Host ""
 
-# If parameter was not passed via CLI/UI invocation, trigger modal fallback
+$NewName = Read-Host "Enter the new computer name"
+$NewName = $NewName.Trim()
+
+# Input Validation
 if ([string]::IsNullOrWhiteSpace($NewName)) {
-    Write-Output "[>] Requesting input via dialog..."
-    $NewName = Show-InputModal -PromptText "Enter new name (Current: $CurrentName):" -WindowTitle "Change Computer Name"
+    Write-Host "[-] Validation Error: No computer name was entered." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit
 }
 
-# Abort if user cancelled the input window or entered whitespace
-if ([string]::IsNullOrWhiteSpace($NewName)) {
-    Write-Warning "[!] Operation cancelled by user or input was empty."
-    return
+if ($NewName.Length -gt 15) {
+    Write-Host "[-] Validation Error: Computer names cannot exceed 15 characters." -ForegroundColor Red
+    Read-Host "Press Enter to exit"
+    exit
 }
 
-# Input Sanitization
-$CleanName = $NewName.Trim()
-
-# NetBIOS Length Check
-if ($CleanName.Length -gt 15) {
-    Write-Error "[-] Validation Error: Name exceeds maximum length of 15 characters."
-    return
+# NetBIOS naming convention check (alphanumeric and internal hyphens only)
+if ($NewName -notmatch '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,13}[a-zA-Z0-9])?$') {
+    Write-Host "[-] Validation Error: Invalid name format." -ForegroundColor Red
+    Write-Host "[!] Use only letters, numbers, and hyphens (no leading or trailing hyphens)." -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit
 }
 
-# NetBIOS Standard Syntax Validation (No leading/trailing hyphens)
-if ($CleanName -notmatch '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,13}[a-zA-Z0-9])?$') {
-    Write-Error "[-] Validation Error: Invalid computer name '$CleanName'."
-    Write-Warning "[!] Allowed: Alphanumeric characters and internal hyphens."
-    return
+if ($NewName.Equals($CurrentName, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Host "[!] Target name is identical to the current computer name." -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit
 }
 
-# Duplicate Name Check
-if ($CleanName.Equals($CurrentName, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Write-Warning "[!] Target name '$CleanName' is identical to the current computer name."
-    return
-}
-
-# Execute Action
-Write-Output "[>] Changing computer name: $CurrentName -> $CleanName"
+Write-Host ""
+Write-Host "[>] Changing computer name:" -ForegroundColor Yellow
+Write-Host "    $CurrentName -> $NewName" -ForegroundColor Cyan
+Write-Host ""
 
 try {
-    Rename-Computer -NewName $CleanName -Force -ErrorAction Stop
+    Rename-Computer -NewName $NewName -Force -ErrorAction Stop
 
-    Write-Output "[+] Computer name successfully changed to '$CleanName'."
-    Write-Warning "[!] System restart required to complete changes."
+    Write-Host "[+] Computer name changed successfully!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "[!] A restart is required for the new name to take effect." -ForegroundColor Yellow
+    Write-Host ""
 
-    if ($Restart) {
-        Write-Warning "[!] Reboot flag active. Restarting computer in 5 seconds..."
-        Start-Sleep -Seconds 5
+    $Restart = Read-Host "Restart the computer now? (Y/N)"
+
+    if ($Restart -eq "Y" -or $Restart -eq "y") {
         Restart-Computer -Force
     }
     else {
-        Write-Output "[>] To apply changes later, restart the computer manually."
+        Write-Host ""
+        Write-Host "[>] Remember to restart the computer later." -ForegroundColor Yellow
     }
 }
 catch {
-    Write-Error "[-] Execution Failed: $($_.Exception.Message)"
+    Write-Host ""
+    Write-Host "[-] Failed to change the computer name." -ForegroundColor Red
+    Write-Host "[-] Exception: $($_.Exception.Message)" -ForegroundColor Red
 }
+
+Write-Host ""
+Read-Host "Press Enter to exit"
