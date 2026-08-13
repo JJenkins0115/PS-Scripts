@@ -1,5 +1,5 @@
 # ============================================================
-# ADMIN TOOLKIT - MAIN MENU & EMBEDDED CONSOLE
+# ADMIN TOOLKIT - MAIN MENU
 # ============================================================
 
 [CmdletBinding()]
@@ -17,7 +17,7 @@ $GitHubBranch = "main"
 $ToolkitName = "Admin Toolkit"
 
 # Temporary download location
-$TempFolder = Join-Path -Path $env:TEMP -ChildPath "AdminToolkit"
+$TempFolder = Join-Path $env:TEMP "AdminToolkit"
 
 # Main script name - this will NOT be shown as a tool
 $MainScriptName = "Main.ps1"
@@ -26,7 +26,7 @@ $MainScriptName = "Main.ps1"
 # HIDE POWERSHELL CONSOLE
 # ============================================================
 
-Add-Type -TypeDefinition @"
+Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 
@@ -35,18 +35,25 @@ public class ConsoleWindow {
     public static extern IntPtr GetConsoleWindow();
 
     [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    public static extern bool ShowWindow(
+        IntPtr hWnd,
+        int nCmdShow
+    );
 }
 "@
 
 $ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
 
 if ($ConsoleHandle -ne [IntPtr]::Zero) {
-    [ConsoleWindow]::ShowWindow($ConsoleHandle, 0)
+
+    [ConsoleWindow]::ShowWindow(
+        $ConsoleHandle,
+        0
+    )
 }
 
 # ============================================================
-# LOAD WINDOWS FORMS & DRAWING
+# LOAD WINDOWS FORMS
 # ============================================================
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -57,121 +64,188 @@ Add-Type -AssemblyName System.Drawing
 $ErrorActionPreference = "Stop"
 
 # ============================================================
-# COLOR PALETTE
+# COLORS
 # ============================================================
 
-$ColorBackground = [System.Drawing.Color]::FromArgb(245, 247, 250)
-$ColorHeader     = [System.Drawing.Color]::FromArgb(30, 41, 59)
-$ColorBlue       = [System.Drawing.Color]::FromArgb(37, 99, 235)
-$ColorText       = [System.Drawing.Color]::FromArgb(30, 41, 59)
-$ColorSubText    = [System.Drawing.Color]::FromArgb(100, 116, 139)
-$ColorWhite      = [System.Drawing.Color]::White
+$ColorBackground = [System.Drawing.Color]::FromArgb(
+    245,247,250
+)
 
-# Console Terminal Palette
-$ColorConsoleBg  = [System.Drawing.Color]::FromArgb(15, 23, 42)
-$ColorConsoleFg  = [System.Drawing.Color]::FromArgb(226, 232, 240)
-$ColorErrorFg    = [System.Drawing.Color]::FromArgb(248, 113, 113)
-$ColorWarningFg  = [System.Drawing.Color]::FromArgb(251, 191, 36)
-$ColorInfoFg     = [System.Drawing.Color]::FromArgb(96, 165, 250)
+$ColorHeader = [System.Drawing.Color]::FromArgb(
+    30,41,59
+)
+
+$ColorBlue = [System.Drawing.Color]::FromArgb(
+    37,99,235
+)
+
+$ColorText = [System.Drawing.Color]::FromArgb(
+    30,41,59
+)
+
+$ColorSubText = [System.Drawing.Color]::FromArgb(
+    100,116,139
+)
+
+$ColorWhite = [System.Drawing.Color]::White
 
 # ============================================================
-# GITHUB ENDPOINTS
+# GITHUB URLS
 # ============================================================
 
-$GitHubAPI = "https://api.github.com/repos/$GitHubUser/$GitHubRepo/git/trees/$GitHubBranch`?recursive=1"
-$RawBase   = "https://raw.githubusercontent.com/$GitHubUser/$GitHubRepo/refs/heads/$GitHubBranch"
+$GitHubAPI =
+    "https://api.github.com/repos/$GitHubUser/$GitHubRepo/git/trees/$GitHubBranch`?recursive=1"
+
+$RawBase =
+    "https://raw.githubusercontent.com/$GitHubUser/$GitHubRepo/refs/heads/$GitHubBranch"
 
 # ============================================================
-# INITIALIZE TEMP DIRECTORY
+# CREATE TEMP FOLDER
 # ============================================================
 
-if (-not (Test-Path -Path $TempFolder)) {
-    New-Item -ItemType Directory -Path $TempFolder -Force | Out-Null
+if (!(Test-Path $TempFolder)) {
+
+    New-Item `
+        -ItemType Directory `
+        -Path $TempFolder `
+        -Force |
+        Out-Null
 }
 
 # ============================================================
-# HELPER FUNCTIONS
+# GET SCRIPT FILES FROM GITHUB
 # ============================================================
-
-function Write-ConsoleOutput {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Text,
-
-        [Parameter(Mandatory = $false)]
-        [System.Drawing.Color]$Color = $ColorConsoleFg
-    )
-
-    if ($null -eq $global:ConsoleOutput -or $global:ConsoleOutput.IsDisposed) {
-        return
-    }
-
-    $Action = [Action]{
-        $global:ConsoleOutput.SelectionStart = $global:ConsoleOutput.TextLength
-        $global:ConsoleOutput.SelectionLength = 0
-        $global:ConsoleOutput.SelectionColor = $Color
-        $global:ConsoleOutput.AppendText("$Text`r`n")
-        $global:ConsoleOutput.ScrollToCaret()
-    }
-
-    if ($global:ConsoleOutput.InvokeRequired) {
-        $global:ConsoleOutput.Invoke($Action) | Out-Null
-    }
-    else {
-        $Action.Invoke()
-    }
-}
 
 function Get-GitHubScripts {
-    [CmdletBinding()]
-    param()
 
     try {
+
         $Headers = @{
             "User-Agent" = "AdminToolkit"
             "Accept"     = "application/vnd.github+json"
         }
 
-        $RepositoryTree = Invoke-RestMethod -Uri $GitHubAPI -Headers $Headers -Method Get -ErrorAction Stop
+        $RepositoryTree = Invoke-RestMethod `
+            -Uri $GitHubAPI `
+            -Headers $Headers `
+            -Method Get `
+            -ErrorAction Stop
 
         if ($null -eq $RepositoryTree.tree) {
+
             throw "GitHub returned no repository files."
         }
 
         $Scripts = @()
 
         foreach ($Item in @($RepositoryTree.tree)) {
-            if ($Item.type -ne "blob") { continue }
-            if ($Item.path -notlike "*.ps1") { continue }
-            if ($Item.path.Equals($MainScriptName, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+
+            # ------------------------------------------------
+            # Only files
+            # ------------------------------------------------
+
+            if ($Item.type -ne "blob") {
+                continue
+            }
+
+            # ------------------------------------------------
+            # Only PowerShell scripts
+            # ------------------------------------------------
+
+            if ($Item.path -notlike "*.ps1") {
+                continue
+            }
+
+            # ------------------------------------------------
+            # Don't display Main.ps1
+            # ------------------------------------------------
+
+            if (
+                $Item.path.Equals(
+                    $MainScriptName,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            ) {
+                continue
+            }
+
+            # ------------------------------------------------
+            # Break path into pieces
+            # ------------------------------------------------
 
             $Parts = $Item.path -split "/"
-            if ($Parts.Count -lt 2) { continue }
 
-            $Folder       = $Parts[0]
-            $FileName     = $Parts[-1]
+            # ------------------------------------------------
+            # Scripts must be inside a folder
+            # ------------------------------------------------
+
+            if ($Parts.Count -lt 2) {
+                continue
+            }
+
+            # ------------------------------------------------
+            # Determine top-level folder
+            # ------------------------------------------------
+
+            $Folder = $Parts[0]
+
+            # ------------------------------------------------
+            # File name
+            # ------------------------------------------------
+
+            $FileName = $Parts[-1]
+
+            # ------------------------------------------------
+            # Repository path
+            # ------------------------------------------------
+
             $RelativePath = $Item.path
-            $RawURL       = "$RawBase/$RelativePath"
+
+            # ------------------------------------------------
+            # Raw GitHub URL
+            # ------------------------------------------------
+
+            $RawURL =
+                "$RawBase/$RelativePath"
+
+            # ------------------------------------------------
+            # Create script object
+            # ------------------------------------------------
 
             $Scripts += [PSCustomObject]@{
-                Name     = [System.IO.Path]::GetFileNameWithoutExtension($FileName)
+
+                Name = [System.IO.Path]::GetFileNameWithoutExtension(
+                    $FileName
+                )
+
                 FileName = $FileName
-                Folder   = $Folder
-                Path     = $RelativePath
-                URL      = $RawURL
-                SHA      = $Item.sha
+
+                Folder = $Folder
+
+                Path = $RelativePath
+
+                URL = $RawURL
+
+                SHA = $Item.sha
             }
         }
 
-        return @($Scripts | Sort-Object Folder, Name)
+        return @(
+            $Scripts |
+            Sort-Object Folder,Name
+        )
     }
+
     catch {
+
         [System.Windows.Forms.MessageBox]::Show(
             "Unable to retrieve scripts from GitHub.`r`n`r`n" +
-            "Repository: $GitHubUser/$GitHubRepo`r`n" +
-            "Branch: $GitHubBranch`r`n`r`n" +
-            "Error: $($_.Exception.Message)",
+            "Repository:`r`n" +
+            "$GitHubUser/$GitHubRepo`r`n`r`n" +
+            "Branch:`r`n" +
+            "$GitHubBranch`r`n`r`n" +
+            "Error:`r`n" +
+            "$($_.Exception.Message)",
             "GitHub Error",
             "OK",
             "Error"
@@ -181,17 +255,30 @@ function Get-GitHubScripts {
     }
 }
 
+# ============================================================
+# DOWNLOAD SCRIPT
+# ============================================================
+
 function Get-RemoteScript {
-    [CmdletBinding()]
+
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [PSCustomObject]$Script
     )
 
-    $LocalFile = Join-Path -Path $TempFolder -ChildPath $Script.FileName
+    # --------------------------------------------------------
+    # Use only the filename locally
+    # --------------------------------------------------------
+
+    $LocalFile = Join-Path `
+        $TempFolder `
+        $Script.FileName
 
     try {
-        $Headers = @{ "User-Agent" = "AdminToolkit" }
+
+        $Headers = @{
+            "User-Agent" = "AdminToolkit"
+        }
 
         Invoke-WebRequest `
             -Uri $Script.URL `
@@ -200,349 +287,559 @@ function Get-RemoteScript {
             -OutFile $LocalFile `
             -ErrorAction Stop
 
-        if (-not (Test-Path -Path $LocalFile)) {
-            throw "The script file could not be saved locally."
+        if (!(Test-Path $LocalFile)) {
+
+            throw "The script was not downloaded."
         }
 
         return $LocalFile
     }
+
     catch {
-        Write-ConsoleOutput -Text "[-] Failed to download script: $($_.Exception.Message)" -Color $ColorErrorFg
+
+        [System.Windows.Forms.MessageBox]::Show(
+            "Unable to download the selected script.`r`n`r`n" +
+            "Script:`r`n" +
+            "$($Script.Path)`r`n`r`n" +
+            "Error:`r`n" +
+            "$($_.Exception.Message)",
+            "Download Error",
+            "OK",
+            "Error"
+        ) | Out-Null
+
         return $null
     }
 }
 
+# ============================================================
+# RUN SCRIPT
+# ============================================================
+
 function Start-Tool {
-    [CmdletBinding()]
+
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [PSCustomObject]$Script
     )
 
-    Write-ConsoleOutput -Text "`r`n[>] Downloading script '$($Script.Name)'..." -Color $ColorInfoFg
-    $LocalFile = Get-RemoteScript -Script $Script
+    $LocalFile = Get-RemoteScript $Script
 
-    if (-not $LocalFile) { return }
+    if (!$LocalFile) {
+        return
+    }
 
-    Write-ConsoleOutput -Text "[+] Executing: $LocalFile" -Color $ColorInfoFg
-    Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
+    try {
 
-    # Execute script asynchronously to prevent UI freeze
-    [System.Threading.Tasks.Task]::Run([Action]{
-        try {
-            $PowerShell = [PowerShell]::Create()
-            [void]$PowerShell.AddScript((Get-Content -Path $LocalFile -Raw))
+        Start-Process `
+            -FilePath "powershell.exe" `
+            -Verb RunAs `
+            -ArgumentList @(
+                "-NoProfile"
+                "-ExecutionPolicy"
+                "Bypass"
+                "-File"
+                "`"$LocalFile`""
+            )
+    }
 
-            # Redirect Standard Output
-            $PowerShell.Streams.Output.add_DataAdded({
-                param($sender, $e)
-                $Data = $sender[$e.Index]
-                Write-ConsoleOutput -Text "$Data" -Color $ColorConsoleFg
-            })
+    catch {
 
-            # Redirect Error Output
-            $PowerShell.Streams.Error.add_DataAdded({
-                param($sender, $e)
-                $Data = $sender[$e.Index]
-                Write-ConsoleOutput -Text "[ERROR] $Data" -Color $ColorErrorFg
-            })
-
-            # Redirect Warning Output
-            $PowerShell.Streams.Warning.add_DataAdded({
-                param($sender, $e)
-                $Data = $sender[$e.Index]
-                Write-ConsoleOutput -Text "[WARN] $Data" -Color $ColorWarningFg
-            })
-
-            # Execute Script
-            [void]$PowerShell.Invoke()
-            $PowerShell.Dispose()
-
-            Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
-            Write-ConsoleOutput -Text "[+] Execution completed successfully." -Color $ColorInfoFg
-        }
-        catch {
-            Write-ConsoleOutput -Text "[-] Execution Exception: $($_.Exception.Message)" -Color $ColorErrorFg
-        }
-    }) | Out-Null
-}
-
-function Execute-CustomCommand {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$CommandText
-    )
-
-    if ([string]::IsNullOrWhiteSpace($CommandText)) { return }
-
-    Write-ConsoleOutput -Text "`r`nPS> $CommandText" -Color $ColorInfoFg
-
-    [System.Threading.Tasks.Task]::Run([Action]{
-        try {
-            $PowerShell = [PowerShell]::Create()
-            [void]$PowerShell.AddScript($CommandText)
-
-            $Results = $PowerShell.Invoke()
-
-            foreach ($Item in $Results) {
-                Write-ConsoleOutput -Text "$Item" -Color $ColorConsoleFg
-            }
-
-            foreach ($Err in $PowerShell.Streams.Error) {
-                Write-ConsoleOutput -Text "[ERROR] $Err" -Color $ColorErrorFg
-            }
-
-            $PowerShell.Dispose()
-        }
-        catch {
-            Write-ConsoleOutput -Text "[-] Command Exception: $($_.Exception.Message)" -Color $ColorErrorFg
-        }
-    }) | Out-Null
+        [System.Windows.Forms.MessageBox]::Show(
+            "Unable to start the selected script.`r`n`r`n" +
+            "$($_.Exception.Message)",
+            "Launch Error",
+            "OK",
+            "Error"
+        ) | Out-Null
+    }
 }
 
 # ============================================================
-# UI BUILDER FUNCTIONS
+# CREATE SCRIPT BUTTON
 # ============================================================
 
 function New-ScriptButton {
-    [CmdletBinding()]
+
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [PSCustomObject]$Script
     )
 
     $Button = New-Object System.Windows.Forms.Button
-    $Button.Width = 280
-    $Button.Height = 40
-    $Button.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 6)
-    $Button.Text = "  >  $($Script.Name)"
-    $Button.TextAlign = "MiddleLeft"
-    $Button.FlatStyle = "Flat"
-    $Button.FlatAppearance.BorderSize = 0
-    $Button.BackColor = $ColorWhite
-    $Button.ForeColor = $ColorText
-    $Button.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9.5)
-    $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $Button.Tag = $Script
 
-    $Button.Add_MouseEnter({ $this.BackColor = [System.Drawing.Color]::FromArgb(239, 246, 255) })
-    $Button.Add_MouseLeave({ $this.BackColor = $ColorWhite })
-    $Button.Add_Click({ Start-Tool -Script $this.Tag })
+    $Button.Width = 735
+    $Button.Height = 48
+
+    $Button.Margin = New-Object `
+        System.Windows.Forms.Padding(
+            0,
+            0,
+            0,
+            8
+        )
+
+    $Button.Text =
+        "▶  $($Script.Name)"
+
+    $Button.TextAlign =
+        "MiddleLeft"
+
+    $Button.FlatStyle =
+        "Flat"
+
+    $Button.FlatAppearance.BorderSize =
+        0
+
+    $Button.BackColor =
+        $ColorWhite
+
+    $Button.ForeColor =
+        $ColorText
+
+    $Button.Font =
+        New-Object System.Drawing.Font(
+            "Segoe UI Semibold",
+            10
+        )
+
+    $Button.Cursor =
+        [System.Windows.Forms.Cursors]::Hand
+
+    $Button.Tag =
+        $Script
+
+    # --------------------------------------------------------
+    # Mouse hover
+    # --------------------------------------------------------
+
+    $Button.Add_MouseEnter({
+
+        $this.BackColor =
+            [System.Drawing.Color]::FromArgb(
+                239,246,255
+            )
+    })
+
+    $Button.Add_MouseLeave({
+
+        $this.BackColor =
+            $ColorWhite
+    })
+
+    # --------------------------------------------------------
+    # Click
+    # --------------------------------------------------------
+
+    $Button.Add_Click({
+
+        $SelectedScript =
+            $this.Tag
+
+        Start-Tool $SelectedScript
+    })
 
     return $Button
 }
 
+# ============================================================
+# CREATE FOLDER HEADER
+# ============================================================
+
 function New-FolderHeader {
-    [CmdletBinding()]
+
     param(
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory)]
         [string]$FolderName
     )
 
-    $Label = New-Object System.Windows.Forms.Label
-    $Label.Text = $FolderName.ToUpper()
-    $Label.Width = 280
-    $Label.Height = 30
-    $Label.Margin = New-Object System.Windows.Forms.Padding(0, 10, 0, 4)
-    $Label.ForeColor = $ColorSubText
-    $Label.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5)
+    $Label =
+        New-Object System.Windows.Forms.Label
+
+    $Label.Text =
+        $FolderName.ToUpper()
+
+    $Label.Width =
+        735
+
+    $Label.Height =
+        35
+
+    $Label.Margin =
+        New-Object System.Windows.Forms.Padding(
+            0,
+            15,
+            0,
+            5
+        )
+
+    $Label.ForeColor =
+        $ColorSubText
+
+    $Label.Font =
+        New-Object System.Drawing.Font(
+            "Segoe UI Semibold",
+            9
+        )
 
     return $Label
 }
 
 # ============================================================
-# MAIN WINDOW FORM DEFINITION
+# MAIN WINDOW
 # ============================================================
 
-$Form = New-Object System.Windows.Forms.Form
-$Form.Text = $ToolkitName
-$Form.Size = New-Object System.Drawing.Size(1100, 750)
-$Form.MinimumSize = New-Object System.Drawing.Size(900, 600)
-$Form.StartPosition = "CenterScreen"
-$Form.BackColor = $ColorBackground
+$Form =
+    New-Object System.Windows.Forms.Form
+
+$Form.Text =
+    $ToolkitName
+
+$Form.Size =
+    New-Object System.Drawing.Size(
+        850,
+        850
+    )
+
+$Form.MinimumSize =
+    New-Object System.Drawing.Size(
+        700,
+        650
+    )
+
+$Form.StartPosition =
+    "CenterScreen"
+
+$Form.BackColor =
+    $ColorBackground
 
 # ============================================================
-# HEADER PANEL
+# HEADER
 # ============================================================
 
-$Header = New-Object System.Windows.Forms.Panel
-$Header.Dock = "Top"
-$Header.Height = 80
-$Header.BackColor = $ColorHeader
-$Form.Controls.Add($Header)
+$Header =
+    New-Object System.Windows.Forms.Panel
 
-$TitleLabel = New-Object System.Windows.Forms.Label
-$TitleLabel.Text = $ToolkitName
-$TitleLabel.Location = New-Object System.Drawing.Point(25, 15)
-$TitleLabel.AutoSize = $true
-$TitleLabel.ForeColor = $ColorWhite
-$TitleLabel.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 18)
-$Header.Controls.Add($TitleLabel)
+$Header.Dock =
+    "Top"
 
-$SubtitleLabel = New-Object System.Windows.Forms.Label
-$SubtitleLabel.Text = "Select a tool from the menu to execute in the embedded console"
-$SubtitleLabel.Location = New-Object System.Drawing.Point(27, 48)
-$SubtitleLabel.AutoSize = $true
-$SubtitleLabel.ForeColor = [System.Drawing.Color]::FromArgb(148, 163, 184)
-$SubtitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-$Header.Controls.Add($SubtitleLabel)
+$Header.Height =
+    125
 
-$RefreshButton = New-Object System.Windows.Forms.Button
-$RefreshButton.Text = "Refresh"
-$RefreshButton.Width = 90
-$RefreshButton.Height = 32
-$RefreshButton.Location = New-Object System.Drawing.Point(960, 24)
-$RefreshButton.Anchor = [System.Windows.Forms.AnchorStyles]::Top -bor [System.Windows.Forms.AnchorStyles]::Right
-$RefreshButton.FlatStyle = "Flat"
-$RefreshButton.FlatAppearance.BorderSize = 0
-$RefreshButton.BackColor = $ColorBlue
-$RefreshButton.ForeColor = $ColorWhite
-$RefreshButton.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
-$Header.Controls.Add($RefreshButton)
+$Header.BackColor =
+    $ColorHeader
+
+$Form.Controls.Add(
+    $Header
+)
 
 # ============================================================
-# MAIN SPLIT CONTAINER (LEFT MENU / RIGHT CONSOLE)
+# TITLE
 # ============================================================
 
-$SplitContainer = New-Object System.Windows.Forms.SplitContainer
-$SplitContainer.Dock = "Fill"
-$SplitContainer.SplitterDistance = 310
-$SplitContainer.IsSplitterFixed = $false
-$SplitContainer.BackColor = $ColorBackground
-$Form.Controls.Add($SplitContainer)
+$TitleLabel =
+    New-Object System.Windows.Forms.Label
 
-# Left Side Panel - Script Menu
-$ScrollPanel = New-Object System.Windows.Forms.Panel
-$ScrollPanel.Dock = "Fill"
-$ScrollPanel.AutoScroll = $true
-$ScrollPanel.Padding = New-Object System.Windows.Forms.Padding(15)
-$SplitContainer.Panel1.Controls.Add($ScrollPanel)
+$TitleLabel.Text =
+    $ToolkitName
 
-$ScriptPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-$ScriptPanel.FlowDirection = "TopDown"
-$ScriptPanel.WrapContents = $false
-$ScriptPanel.AutoSize = $true
-$ScriptPanel.AutoSizeMode = "GrowAndShrink"
-$ScriptPanel.Dock = "Top"
-$ScrollPanel.Controls.Add($ScriptPanel)
+$TitleLabel.Location =
+    New-Object System.Drawing.Point(
+        30,
+        20
+    )
 
-# Right Side Panel - Console Container
-$ConsoleContainer = New-Object System.Windows.Forms.Panel
-$ConsoleContainer.Dock = "Fill"
-$ConsoleContainer.Padding = New-Object System.Windows.Forms.Padding(10)
-$ConsoleContainer.BackColor = $ColorBackground
-$SplitContainer.Panel2.Controls.Add($ConsoleContainer)
+$TitleLabel.AutoSize =
+    $true
 
-# Console Output Box
-$global:ConsoleOutput = New-Object System.Windows.Forms.RichTextBox
-$global:ConsoleOutput.Dock = "Fill"
-$global:ConsoleOutput.BackColor = $ColorConsoleBg
-$global:ConsoleOutput.ForeColor = $ColorConsoleFg
-$global:ConsoleOutput.Font = New-Object System.Drawing.Font("Consolas", 10)
-$global:ConsoleOutput.ReadOnly = $true
-$global:ConsoleOutput.BorderStyle = "None"
-$global:ConsoleOutput.Text = "============================================================`r`n Admin Toolkit Console initialized.`r`n Select a script from the menu to execute output here.`r`n============================================================`r`n"
-$ConsoleContainer.Controls.Add($global:ConsoleOutput)
+$TitleLabel.ForeColor =
+    $ColorWhite
 
-# Console Input Panel (Bottom Control Bar)
-$InputPanel = New-Object System.Windows.Forms.Panel
-$InputPanel.Dock = "Bottom"
-$InputPanel.Height = 40
-$InputPanel.Padding = New-Object System.Windows.Forms.Padding(0, 5, 0, 0)
-$ConsoleContainer.Controls.Add($InputPanel)
+$TitleLabel.Font =
+    New-Object System.Drawing.Font(
+        "Segoe UI Semibold",
+        24
+    )
 
-$CommandInput = New-Object System.Windows.Forms.TextBox
-$CommandInput.Dock = "Fill"
-$CommandInput.BackColor = $ColorConsoleBg
-$CommandInput.ForeColor = $ColorConsoleFg
-$CommandInput.Font = New-Object System.Drawing.Font("Consolas", 10)
-$CommandInput.BorderStyle = "FixedSingle"
-$InputPanel.Controls.Add($CommandInput)
-
-$SendButton = New-Object System.Windows.Forms.Button
-$SendButton.Text = "Run"
-$SendButton.Dock = "Right"
-$SendButton.Width = 60
-$SendButton.FlatStyle = "Flat"
-$SendButton.FlatAppearance.BorderSize = 0
-$SendButton.BackColor = $ColorBlue
-$SendButton.ForeColor = $ColorWhite
-$SendButton.Font = New-Object System.Drawing.Font("Segoe UI Semibold", 8.5)
-$InputPanel.Controls.Add($SendButton)
-
-# Command Input Event Handling
-$ExecuteInput = {
-    $Command = $CommandInput.Text
-    $CommandInput.Clear()
-    Execute-CustomCommand -CommandText $Command
-}
-
-$SendButton.Add_Click($ExecuteInput)
-$CommandInput.Add_KeyDown({
-    if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
-        $_.SuppressKeyPress = $true
-        $ExecuteInput.Invoke()
-    }
-})
+$Header.Controls.Add(
+    $TitleLabel
+)
 
 # ============================================================
-# LOAD SCRIPTS LOGIC
+# SUBTITLE
+# ============================================================
+
+$SubtitleLabel =
+    New-Object System.Windows.Forms.Label
+
+$SubtitleLabel.Text =
+    "Select a tool to run"
+
+$SubtitleLabel.Location =
+    New-Object System.Drawing.Point(
+        33,
+        62
+    )
+
+$SubtitleLabel.AutoSize =
+    $true
+
+$SubtitleLabel.ForeColor =
+    [System.Drawing.Color]::FromArgb(
+        148,
+        163,
+        184
+    )
+
+$SubtitleLabel.Font =
+    New-Object System.Drawing.Font(
+        "Segoe UI",
+        10
+    )
+
+$Header.Controls.Add(
+    $SubtitleLabel
+)
+
+# ============================================================
+# REFRESH BUTTON
+# ============================================================
+
+$RefreshButton =
+    New-Object System.Windows.Forms.Button
+
+$RefreshButton.Text =
+    "Refresh"
+
+$RefreshButton.Width =
+    100
+
+$RefreshButton.Height =
+    35
+
+$RefreshButton.Location =
+    New-Object System.Drawing.Point(
+        710,
+        25
+    )
+
+$RefreshButton.FlatStyle =
+    "Flat"
+
+$RefreshButton.FlatAppearance.BorderSize =
+    0
+
+$RefreshButton.BackColor =
+    $ColorBlue
+
+$RefreshButton.ForeColor =
+    $ColorWhite
+
+$RefreshButton.Font =
+    New-Object System.Drawing.Font(
+        "Segoe UI Semibold",
+        9
+    )
+
+$Header.Controls.Add(
+    $RefreshButton
+)
+
+# ============================================================
+# SCROLL AREA
+# ============================================================
+
+$ScrollPanel =
+    New-Object System.Windows.Forms.Panel
+
+$ScrollPanel.Dock =
+    "Fill"
+
+$ScrollPanel.AutoScroll =
+    $true
+
+$ScrollPanel.Padding =
+    New-Object System.Windows.Forms.Padding(
+        25,
+        20,
+        25,
+        20
+    )
+
+$ScrollPanel.BackColor =
+    $ColorBackground
+
+$Form.Controls.Add(
+    $ScrollPanel
+)
+
+$ScrollPanel.BringToFront()
+
+# ============================================================
+# SCRIPT CONTAINER
+# ============================================================
+
+$ScriptPanel =
+    New-Object System.Windows.Forms.FlowLayoutPanel
+
+$ScriptPanel.FlowDirection =
+    "TopDown"
+
+$ScriptPanel.WrapContents =
+    $false
+
+$ScriptPanel.AutoSize =
+    $true
+
+$ScriptPanel.AutoSizeMode =
+    "GrowAndShrink"
+
+$ScriptPanel.Dock =
+    "Top"
+
+$ScrollPanel.Controls.Add(
+    $ScriptPanel
+)
+
+# ============================================================
+# LOAD SCRIPTS
 # ============================================================
 
 function Load-Scripts {
-    $RefreshButton.Enabled = $false
-    $RefreshButton.Text = "Loading..."
+
+    $RefreshButton.Enabled =
+        $false
+
+    $RefreshButton.Text =
+        "Loading..."
+
     $ScriptPanel.SuspendLayout()
 
     try {
-        $ScriptPanel.Controls.Clear()
-        $Scripts = Get-GitHubScripts
 
-        if ($null -eq $Scripts -or $Scripts.Count -eq 0) {
-            $NoScripts = New-Object System.Windows.Forms.Label
-            $NoScripts.Text = "No PowerShell scripts were found.`r`n`r`nRepo: $GitHubUser/$GitHubRepo`r`nBranch: $GitHubBranch"
-            $NoScripts.Width = 280
-            $NoScripts.Height = 150
-            $NoScripts.ForeColor = $ColorText
-            $NoScripts.Font = New-Object System.Drawing.Font("Segoe UI", 9.5)
-            $ScriptPanel.Controls.Add($NoScripts)
+        $ScriptPanel.Controls.Clear()
+
+        $Scripts =
+            Get-GitHubScripts
+
+        if (
+            $null -eq $Scripts -or
+            $Scripts.Count -eq 0
+        ) {
+
+            $NoScripts =
+                New-Object System.Windows.Forms.Label
+
+            $NoScripts.Text = @"
+No PowerShell scripts were found.
+
+Repository:
+$GitHubUser/$GitHubRepo
+
+Branch:
+$GitHubBranch
+
+Make sure your .ps1 files are inside folders
+in the repository.
+"@
+
+            $NoScripts.Width =
+                735
+
+            $NoScripts.Height =
+                150
+
+            $NoScripts.ForeColor =
+                $ColorText
+
+            $NoScripts.Font =
+                New-Object System.Drawing.Font(
+                    "Segoe UI",
+                    11
+                )
+
+            $ScriptPanel.Controls.Add(
+                $NoScripts
+            )
+
             return
         }
 
-        $Groups = $Scripts | Group-Object Folder
+        # ----------------------------------------------------
+        # Group scripts by top-level folder
+        # ----------------------------------------------------
+
+        $Groups =
+            $Scripts |
+            Group-Object Folder
 
         foreach ($Group in $Groups) {
-            $FolderHeader = New-FolderHeader -FolderName $Group.Name
-            $ScriptPanel.Controls.Add($FolderHeader)
+
+            $FolderHeader =
+                New-FolderHeader `
+                    -FolderName $Group.Name
+
+            $ScriptPanel.Controls.Add(
+                $FolderHeader
+            )
 
             foreach ($Script in $Group.Group) {
-                $Button = New-ScriptButton -Script $Script
-                $ScriptPanel.Controls.Add($Button)
+
+                $Button =
+                    New-ScriptButton `
+                        -Script $Script
+
+                $ScriptPanel.Controls.Add(
+                    $Button
+                )
             }
         }
     }
+
     catch {
+
         [System.Windows.Forms.MessageBox]::Show(
-            "Unable to load scripts.`r`n`r`n$($_.Exception.Message)",
+            "Unable to load scripts.`r`n`r`n" +
+            "$($_.Exception.Message)",
             "Admin Toolkit",
             "OK",
             "Error"
         ) | Out-Null
     }
+
     finally {
+
         $ScriptPanel.ResumeLayout()
-        $RefreshButton.Enabled = $true
-        $RefreshButton.Text = "Refresh"
+
+        $RefreshButton.Enabled =
+            $true
+
+        $RefreshButton.Text =
+            "Refresh"
     }
 }
 
 # ============================================================
-# BINDINGS AND APPLICATION START
+# REFRESH
 # ============================================================
 
-$RefreshButton.Add_Click({ Load-Scripts })
-$Form.Add_Shown({ Load-Scripts })
+$RefreshButton.Add_Click({
+
+    Load-Scripts
+})
+
+# ============================================================
+# FORM SHOWN
+# ============================================================
+
+$Form.Add_Shown({
+
+    Load-Scripts
+})
+
+# ============================================================
+# START APPLICATION
+# ============================================================
 
 [void]$Form.ShowDialog()
 
@@ -551,10 +848,15 @@ $Form.Add_Shown({ Load-Scripts })
 # ============================================================
 
 try {
-    if (Test-Path -Path $TempFolder) {
-        Remove-Item -Path $TempFolder -Recurse -Force -ErrorAction SilentlyContinue
+
+    if (Test-Path $TempFolder) {
+
+        Remove-Item `
+            -Path $TempFolder `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
     }
 }
 catch {
-    # Suppress cleanup exceptions during teardown
 }
