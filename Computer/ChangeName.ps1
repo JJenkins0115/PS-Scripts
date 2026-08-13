@@ -1,100 +1,104 @@
-# ============================================
-# Change Computer Name
-# ============================================
+# ============================================================
+# CHANGE COMPUTER NAME (EMBEDDED RUNSPACE COMPATIBLE)
+# ============================================================
 
-# Check for Administrator privileges
-$CurrentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
-$Principal = New-Object Security.Principal.WindowsPrincipal($CurrentIdentity)
+[CmdletBinding()]
+param(
+    # New NetBIOS name for the local computer (1-15 alphanumeric/hyphen characters)
+    [Parameter(Mandatory = $false, Position = 0)]
+    [ValidateNotNullOrEmpty()]
+    [string]$NewName,
 
-if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    # Optional parameter to force reboot after successful rename
+    [Parameter(Mandatory = $false)]
+    [switch]$Restart
+)
 
-    Write-Host "Administrator privileges are required." -ForegroundColor Yellow
-    Write-Host "Requesting elevation..." -ForegroundColor Yellow
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 
-    Start-Process powershell.exe `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" `
-        -Verb RunAs
-
-    exit
+function Test-IsAdministrator {
+    <#
+        .SYNOPSIS
+        Checks if the current process running context has elevated administrative privileges.
+        Why: Prevents invoking privileged execution commands when UAC elevation is absent,
+        returning output directly to the streams rather than spawning unwanted secondary windows.
+    #>
+    $Identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $Principal = [Security.Principal.WindowsPrincipal]$Identity
+    return $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-Clear-Host
+# ============================================================
+# EXECUTION PIPELINE
+# ============================================================
 
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "       Change Computer Name" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host ""
+Write-Output "============================================================"
+Write-Output "               Change Computer Name Utility                 "
+Write-Output "============================================================"
+
+# Verify administrative context
+if (-not (Test-IsAdministrator)) {
+    Write-Error "[!] Administrator privileges are required to rename this computer."
+    Write-Warning "[!] Please launch the main Admin Toolkit application with elevated rights (Run as Administrator)."
+    return
+}
 
 $CurrentName = $env:COMPUTERNAME
+Write-Output "[>] Current Computer Name: $CurrentName"
 
-Write-Host "Current computer name: $CurrentName" -ForegroundColor Gray
-Write-Host ""
-
-$NewName = Read-Host "Enter the new computer name"
-
-# Remove accidental spaces
-$NewName = $NewName.Trim()
-
-# Validate name
+# Handle missing parameter by logging instructions
 if ([string]::IsNullOrWhiteSpace($NewName)) {
-    Write-Host "No computer name was entered." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit
+    Write-Warning "[!] No new computer name was specified."
+    Write-Output "------------------------------------------------------------"
+    Write-Output " Usage Example (Run in command box below):"
+    Write-Output "   .\ChangeName.ps1 -NewName 'SERVER-01'"
+    Write-Output "   .\ChangeName.ps1 -NewName 'SERVER-01' -Restart"
+    Write-Output "------------------------------------------------------------"
+    return
 }
 
-if ($NewName.Length -gt 15) {
-    Write-Host "Computer names cannot exceed 15 characters." -ForegroundColor Red
-    Read-Host "Press Enter to exit"
-    exit
+# Sanitize inputs
+$CleanName = $NewName.Trim()
+
+# Validate against RFC 1123 / NetBIOS constraints
+if ($CleanName.Length -gt 15) {
+    Write-Error "[-] Computer names cannot exceed 15 characters in length."
+    return
 }
 
-if ($NewName -notmatch '^[a-zA-Z0-9-]+$') {
-    Write-Host "Invalid computer name." -ForegroundColor Red
-    Write-Host "Use only letters, numbers, and hyphens." -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    exit
+# Regex Ensures: Starts/Ends with Alphanumeric, Hyphens allowed in middle only
+if ($CleanName -notmatch '^[a-zA-Z0-9]([a-zA-Z0-9-]{0,13}[a-zA-Z0-9])?$') {
+    Write-Error "[-] Invalid computer name format: '$CleanName'."
+    Write-Warning "[!] Names must contain only letters, numbers, and hyphens (cannot start or end with a hyphen)."
+    return
 }
 
-if ($NewName -eq $CurrentName) {
-    Write-Host "The new name is the same as the current name." -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    exit
+if ($CleanName.Equals($CurrentName, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Warning "[!] Target name '$CleanName' is identical to the current computer name."
+    return
 }
 
-Write-Host ""
-Write-Host "Changing computer name:" -ForegroundColor Yellow
-Write-Host "  $CurrentName -> $NewName" -ForegroundColor Cyan
-Write-Host ""
+# Execution Action
+Write-Output "[>] Attempting to rename computer: $CurrentName -> $CleanName"
 
 try {
+    Rename-Computer -NewName $CleanName -Force -ErrorAction Stop
+    
+    Write-Output "[+] Computer name successfully changed to '$CleanName'."
+    Write-Warning "[!] A system restart is required for changes to take full effect."
 
-    Rename-Computer `
-        -NewName $NewName `
-        -Force `
-        -ErrorAction Stop
-
-    Write-Host "Computer name changed successfully!" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "A restart is required for the new name to take effect." -ForegroundColor Yellow
-    Write-Host ""
-
-    $Restart = Read-Host "Restart the computer now? (Y/N)"
-
-    if ($Restart -eq "Y" -or $Restart -eq "y") {
+    if ($Restart) {
+        Write-Warning "[!] -Restart switch detected. Initiating system restart in 5 seconds..."
+        Start-Sleep -Seconds 5
         Restart-Computer -Force
     }
     else {
-        Write-Host ""
-        Write-Host "Remember to restart the computer later." -ForegroundColor Yellow
+        Write-Output "[>] To restart later, execute 'Restart-Computer' or use your administrative controls."
     }
-
 }
 catch {
-
-    Write-Host ""
-    Write-Host "Failed to change the computer name." -ForegroundColor Red
-    Write-Host ""
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Error "[-] Failed to rename computer '$CurrentName'."
+    Write-Error "[-] Exception: $($_.Exception.Message)"
 }
-
-Read-Host "`nPress Enter to exit"
