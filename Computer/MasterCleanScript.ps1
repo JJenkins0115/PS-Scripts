@@ -11,48 +11,20 @@ $scriptStart = Get-Date
 $Global:ExecutionReport = [System.Collections.Generic.List[PSObject]]::new()
 $Global:StopRequested = $false
 
-function Write-MaintenanceLog {
-    param(
-        [string]$Message, 
-        [ValidateSet("INFO","WARN","ERROR","SUCCESS","SPACE","REPORT")]$Level = "INFO"
-    )
-    $timestamp = Get-Date -Format "hh:mm:ss tt"
-    $colors = @{ "INFO"="Cyan"; "WARN"="Yellow"; "ERROR"="Red"; "SUCCESS"="Green"; "SPACE"="Magenta"; "REPORT"="White" }
-    Write-Host "[$timestamp] $($Level): $Message" -ForegroundColor $colors[$Level]
-}
-
 function Write-DriveSpace {
     param([string]$StepName)
     $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
     $freeGB = [math]::Round($drive.FreeSpace / 1GB, 2)
-    Write-MaintenanceLog "C: Drive ($StepName): $freeGB GB Free" "SPACE"
+    Write-host "C: Drive ($StepName): $freeGB GB Free" "SPACE"
 }
-
-function Invoke-MaintenanceTask {
-    param([string]$Name, [ScriptBlock]$Task)
-
-    if ($Global:StopRequested) {
-        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="SKIPPED" })
-        return
-    }
-
-    Write-MaintenanceLog "Executing: $Name" "INFO"
-    try {
-        & $Task
-        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="COMPLETED" })
-    } catch {
-        Write-MaintenanceLog "Error in $Name: $($_.Exception.Message)" "ERROR"
-        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="FAILED" })
-    }
     Write-DriveSpace -StepName "Post-$Name"
-}
 
 # ------------------------------------------------------------
 # CLEANUP & DIAGNOSTIC FUNCTIONS
 # ------------------------------------------------------------
 
 function Start-DSOrphanedFiles {
-    Write-MaintenanceLog "Starting Driver Store and System Maintenance Tasks..." "INFO"
+    Write-host "Starting Driver Store and System Maintenance Tasks..." "INFO"
     
     # Configure GitHub release asset parameters inside temporary workspace
     $downloadUrl = "https://github.com/lostindark/DriverStoreExplorer/releases/download/v0.12.64/DriverStoreExplorer.v0.12.64.zip"
@@ -66,24 +38,24 @@ function Start-DSOrphanedFiles {
             New-Item $extractPath -ItemType Directory -Force | Out-Null 
         }
 
-        Write-MaintenanceLog "Downloading DriverStoreExplorer from GitHub..." "INFO"
+        Write-host "Downloading DriverStoreExplorer from GitHub..." "INFO"
         Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
         
-        Write-MaintenanceLog "Extracting DriverStoreExplorer package..." "INFO"
+        Write-host "Extracting DriverStoreExplorer package..." "INFO"
         Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force -ErrorAction Stop
         
         # Locate Rapr.exe regardless of folder depth inside the zip
         $exeFile = Get-ChildItem -Path $extractPath -Recurse -Filter "Rapr.exe" | Select-Object -First 1
 
         if ($exeFile) {
-            Write-MaintenanceLog "Launching DriverStoreExplorer background process (/purge)..." "INFO"
+            Write-host "Launching DriverStoreExplorer background process (/purge)..." "INFO"
             $driverProcess = Start-Process -FilePath $exeFile.FullName -ArgumentList "/purge" -Verb RunAs -PassThru
         } else {
-            Write-MaintenanceLog "Rapr.exe not found inside extracted package." "ERROR"
+            Write-host "Rapr.exe not found inside extracted package." "ERROR"
         }
 
         # Orphaned MSI/MSP Registry Check
-        Write-MaintenanceLog "Scanning for orphaned MSI/MSP files..." "INFO"
+        Write-host "Scanning for orphaned MSI/MSP files..." "INFO"
         $InstallerPath = "C:\Windows\Installer"
         if (Test-Path $InstallerPath) {
             $AllFiles = Get-ChildItem -Path $InstallerPath -Include *.msi, *.msp -Recurse -ErrorAction SilentlyContinue
@@ -92,16 +64,16 @@ function Start-DSOrphanedFiles {
                 if (-not $Match) {
                     try { 
                         Remove-Item $File.FullName -Force -ErrorAction Stop
-                        Write-MaintenanceLog "Deleted orphaned file: $($File.Name)" "SUCCESS"
+                        Write-host "Deleted orphaned file: $($File.Name)" "SUCCESS"
                     } catch { }
                 }
             }
         }
 
         if ($null -ne $driverProcess -and -not $driverProcess.HasExited) {
-            Write-MaintenanceLog "Waiting for DriverStoreExplorer task completion..." "INFO"
+            Write-host "Waiting for DriverStoreExplorer task completion..." "INFO"
             $driverProcess | Wait-Process
-            Write-MaintenanceLog "Driver cleanup complete." "SUCCESS"
+            Write-host "Driver cleanup complete." "SUCCESS"
         }
     } 
     finally {
@@ -111,13 +83,13 @@ function Start-DSOrphanedFiles {
 }
 
 function Get-BatteryHealth {
-    Write-MaintenanceLog "Analyzing Battery Health..." "INFO"
+    Write-host "Analyzing Battery Health..." "INFO"
     $xmlPath = Join-Path -Path $env:TEMP -ChildPath "bat_report.xml"
     
     try {
         $batCheck = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
         if (-not $batCheck) {
-            Write-MaintenanceLog "No battery detected (Desktop System)." "INFO"
+            Write-host "No battery detected (Desktop System)." "INFO"
             return
         }
 
@@ -132,13 +104,13 @@ function Get-BatteryHealth {
                 $health = [math]::Round(($fullCap / $designCap) * 100, 1)
                 $statusColor = if ($health -ge 80) { "SUCCESS" } elseif ($health -ge 50) { "WARN" } else { "ERROR" }
 
-                Write-MaintenanceLog "Battery Model: $($batCheck.Name)" "INFO"
-                Write-MaintenanceLog "Battery Health: $health% ($fullCap mWh / $designCap mWh)" $statusColor
+                Write-host "Battery Model: $($batCheck.Name)" "INFO"
+                Write-host "Battery Health: $health% ($fullCap mWh / $designCap mWh)" $statusColor
             }
         }
     } 
     catch {
-        Write-MaintenanceLog "Battery Analysis Error: $($_.Exception.Message)" "ERROR"
+        Write-host "Battery Analysis Error: $($_.Exception.Message)" "ERROR"
     } 
     finally {
         if (Test-Path $xmlPath) { Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue }
@@ -146,12 +118,12 @@ function Get-BatteryHealth {
 }
 
 function AdditionalClean {
-    Write-MaintenanceLog "Disabling Hibernation to reclaim system storage..." "INFO"
+    Write-host "Disabling Hibernation to reclaim system storage..." "INFO"
     powercfg /hibernate off
 }
 
 function Start-ManualDiskCleanup {
-    Write-MaintenanceLog "Cleaning System Cache and Application remnants..." "INFO"
+    Write-host "Cleaning System Cache and Application remnants..." "INFO"
     $Targets = @(
         "C:\Windows\Panther\*", "C:\Windows\inf\*.log", "C:\Windows\Logs\*",
         "C:\ProgramData\Microsoft\Windows\WER\*", "$env:LOCALAPPDATA\Microsoft\Windows\WER\*",
