@@ -230,6 +230,7 @@ function Invoke-DriverStoreCleanup {
         }
     }
     catch {
+        pause
         Write-Status -Message "GitHub API query failed ($($_.Exception.Message)). Attempting direct download endpoint..." -Type "WARN"
     }
 
