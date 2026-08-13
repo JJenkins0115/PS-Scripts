@@ -321,6 +321,6 @@ Disable-Hibernation
 Invoke-ManualDiskCleanup
 Invoke-ExcessCleanup
 Invoke-DriverStoreCleanup
-
+pause
 Write-Host ""
 Write-Status -Message "Master maintenance tasks completed successfully." -Type "SUCCESS"
