@@ -7,15 +7,7 @@
         {
             "Name": "Rename Computer",
             "File": "Computer/ChangeName.ps1"
-        }
-    ],
-    "Applications": [
-        {
-            "Name": "Application Cleanup",
-            "File": "Applications/InteractiveUninstallTool.ps1"
-        }
-    ],
-    "Hardware": [
+        },
         {
             "Name": "Battery Tools",
             "File": "Hardware/BatteryTools.ps1"
@@ -23,12 +15,17 @@
         {
             "Name": "Check Storage",
             "File": "Hardware/CheckStorage.ps1"
-        }
-    ],
-    "Updates": [
+        },
         {
             "Name": "Updates",
             "File": "Domain/RunUpdate.ps1"
         }
     ]
+    "Applications": [
+        {
+            "Name": "Application Cleanup",
+            "File": "Applications/InteractiveUninstallTool.ps1"
+        }
+    ],
+
 }
