@@ -11,14 +11,6 @@ $scriptStart = Get-Date
 $Global:ExecutionReport = [System.Collections.Generic.List[PSObject]]::new()
 $Global:StopRequested = $false
 
-function Write-DriveSpace {
-    param([string]$StepName)
-    $drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
-    $freeGB = [math]::Round($drive.FreeSpace / 1GB, 2)
-    Write-host "C: Drive ($StepName): $freeGB GB Free" "SPACE"
-}
-    Write-DriveSpace -StepName "Post-$Name"
-
 # ------------------------------------------------------------
 # CLEANUP & DIAGNOSTIC FUNCTIONS
 # ------------------------------------------------------------
