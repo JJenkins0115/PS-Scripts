@@ -22,34 +22,34 @@ $TempFolder = Join-Path -Path $env:TEMP -ChildPath "AdminToolkit"
 # Main script name - this will NOT be shown as a tool
 $MainScriptName = "Main.ps1"
 
-# ============================================================
-# HIDE POWERSHELL CONSOLE
-# ============================================================
+# # ============================================================
+# # HIDE POWERSHELL CONSOLE
+# # ============================================================
 
-# Check if the type is already compiled in the current AppDomain
-# to prevent 'Type name ConsoleWindow already exists' errors in VS Code/ISE.
-if (-not ([System.Management.Automation.PSTypeName]'ConsoleWindow').Type) {
-    Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
+# # Check if the type is already compiled in the current AppDomain
+# # to prevent 'Type name ConsoleWindow already exists' errors in VS Code/ISE.
+# if (-not ([System.Management.Automation.PSTypeName]'ConsoleWindow').Type) {
+#     Add-Type -TypeDefinition @"
+# using System;
+# using System.Runtime.InteropServices;
 
-public class ConsoleWindow {
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetConsoleWindow();
+# public class ConsoleWindow {
+#     [DllImport("kernel32.dll")]
+#     public static extern IntPtr GetConsoleWindow();
 
-    [DllImport("user32.dll")]
-    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-}
-"@
-}
+#     [DllImport("user32.dll")]
+#     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+# }
+# "@
+# }
 
-# Retrieve console handle and hide window if running interactively
-$ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
+# # Retrieve console handle and hide window if running interactively
+# $ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
 
-if ($ConsoleHandle -ne [IntPtr]::Zero) {
-    # 0 = SW_HIDE
-    [ConsoleWindow]::ShowWindow($ConsoleHandle, 0)
-}
+# if ($ConsoleHandle -ne [IntPtr]::Zero) {
+#     # 0 = SW_HIDE
+#     [ConsoleWindow]::ShowWindow($ConsoleHandle, 0)
+# }
 # ============================================================
 # LOAD WINDOWS FORMS & DRAWING
 # ============================================================
