@@ -10,15 +10,19 @@
         },
         {
             "Name": "Battery Tools",
-            "File": "Hardware/BatteryTools.ps1"
+            "File": "Computer/BatteryTools.ps1"
         },
         {
             "Name": "Check Storage",
-            "File": "Hardware/CheckStorage.ps1"
+            "File": "Computer/CheckStorage.ps1"
+        },
+        {
+            "Name": "MasterCleanScript",
+            "File": "Computer/MasterCleanScript.ps1"
         },
         {
             "Name": "Updates",
-            "File": "Domain/RunUpdate.ps1"
+            "File": "Computer/RunUpdate.ps1"
         }
     ]
     "Applications": [
