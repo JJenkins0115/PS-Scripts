@@ -250,18 +250,18 @@ Write-Host ""
 
 # 1. Battery Diagnostic Check
 Get-BatteryHealth
-
+pause
 # 2. Hibernation Removal
 Disable-Hibernation
-
+pause
 # 3. Disk & Browser Cache Purge
 Invoke-ManualDiskCleanup
-
+pause
 # 4. Service Cache & Temp Files Cleanup
 Invoke-ExcessCleanup
-
+pause
 # 5. Driver Store Explorer Download & Driver Cleanup (At End)
 Invoke-DriverStoreCleanup
-
+pause
 Write-Host ""
 Write-Status -Message "Master maintenance operations completed successfully." -Type "SUCCESS"
