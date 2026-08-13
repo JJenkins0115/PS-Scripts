@@ -14,7 +14,7 @@ $GitHubRepo   = "PS-Scripts"
 $GitHubBranch = "main"
 
 # Name displayed in the application
-$ToolkitName = "Admin Toolkit"
+$ToolkitName = $Env:ComputerName
 
 # Temporary download location
 $TempFolder = Join-Path $env:TEMP "AdminToolkit"
