@@ -1,18 +1,20 @@
 # ============================================================
-# CHANGE COMPUTER NAME (EMBEDDED RUNSPACE COMPATIBLE)
+# CHANGE COMPUTER NAME (GUI PROMPT COMPATIBLE)
 # ============================================================
 
 [CmdletBinding()]
 param(
     # New NetBIOS name for the local computer (1-15 alphanumeric/hyphen characters)
     [Parameter(Mandatory = $false, Position = 0)]
-    [ValidateNotNullOrEmpty()]
     [string]$NewName,
 
     # Optional parameter to force reboot after successful rename
     [Parameter(Mandatory = $false)]
     [switch]$Restart
 )
+
+# Load Visual Basic assembly for lightweight native input dialogs
+Add-Type -AssemblyName Microsoft.VisualBasic
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -21,9 +23,9 @@ param(
 function Test-IsAdministrator {
     <#
         .SYNOPSIS
-        Checks if the current process running context has elevated administrative privileges.
-        Why: Prevents invoking privileged execution commands when UAC elevation is absent,
-        returning output directly to the streams rather than spawning unwanted secondary windows.
+        Checks if the current process context has administrative rights.
+        Why: Prevents invoking privileged execution commands when elevation is absent,
+        returning output directly to the streams rather than spawning secondary windows.
     #>
     $Identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $Principal = [Security.Principal.WindowsPrincipal]$Identity
@@ -48,14 +50,18 @@ if (-not (Test-IsAdministrator)) {
 $CurrentName = $env:COMPUTERNAME
 Write-Output "[>] Current Computer Name: $CurrentName"
 
-# Handle missing parameter by logging instructions
+# If no parameter was provided via CLI, spawn an InputBox GUI on top of the toolkit
 if ([string]::IsNullOrWhiteSpace($NewName)) {
-    Write-Warning "[!] No new computer name was specified."
-    Write-Output "------------------------------------------------------------"
-    Write-Output " Usage Example (Run in command box below):"
-    Write-Output "   .\ChangeName.ps1 -NewName 'SERVER-01'"
-    Write-Output "   .\ChangeName.ps1 -NewName 'SERVER-01' -Restart"
-    Write-Output "------------------------------------------------------------"
+    $NewName = [Microsoft.VisualBasic.Interaction]::InputBox(
+        "Enter the new computer name for this device (Current: $CurrentName):",
+        "Change Computer Name",
+        ""
+    )
+}
+
+# Handle User Cancellation
+if ([string]::IsNullOrWhiteSpace($NewName)) {
+    Write-Warning "[!] Operation canceled by user or no computer name provided."
     return
 }
 
