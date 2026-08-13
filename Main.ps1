@@ -1,101 +1,91 @@
-# ============================================================
-# MAIN TOOLKIT LAUNCHER (VS CODE & NATIVE TERMINAL OPTIMIZED)
-# ============================================================
+# ============================================
+# Main Toolkit Launcher
+# ============================================
 
-[CmdletBinding()]
-param()
+# Ensure script runs with proper privileges or host configuration
+$ErrorActionPreference = "Stop"
 
-# Ensure strict execution standard
-Set-StrictMode -Version 3.0
-
-# Reset initial state to prevent sticky variable auto-execution
-$Global:SelectedTool = $null
-
-function Start-Tool {
-    [CmdletBinding()]
+function Write-ConsoleOutput {
     param(
-        [Parameter(Mandatory = $true)]
-        [PSCustomObject]$ToolScript
+        [string]$Text,
+        [System.ConsoleColor]$Color = [System.ConsoleColor]::White
+    )
+    Write-Host $Text -ForegroundColor $Color
+}
+
+function Get-RemoteScript {
+    param(
+        [PSCustomObject]$Script
     )
 
-    Write-Host ""
-    Write-Host "[>] Preparing script launch for '$($ToolScript.Name)'..." -ForegroundColor Cyan
-
-    $LocalFile = Get-RemoteScript -Script $ToolScript
-
-    if (-not $LocalFile -or -not (Test-Path -Path $LocalFile)) {
-        Write-Host "[-] Error: Local script file could not be found." -ForegroundColor Red
-        return
+    $TempDir = Join-Path -Path $env:TEMP -ChildPath "AdminToolkit"
+    if (-not (Test-Path -Path $TempDir)) {
+        New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
     }
 
-    Write-Host "[+] Spawning independent 1-to-1 PowerShell window..." -ForegroundColor Green
-    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    $LocalPath = Join-Path -Path $TempDir -ChildPath "$($Script.Name).ps1"
+
+    # Simulated local script resolution/download logic
+    if (Test-Path -Path $Script.Path) {
+        Copy-Item -Path $Script.Path -Destination $LocalPath -Force
+        return $LocalPath
+    }
+    
+    return $null
+}
+
+function Start-Tool {
+    param(
+        [PSCustomObject]$Script
+    )
+
+    Write-ConsoleOutput -Text "`r`n[>] Downloading script '$($Script.Name)'..." -Color Cyan
+    $LocalFile = Get-RemoteScript -Script $Script
+
+    if (-not $LocalFile) { 
+        Write-ConsoleOutput -Text "[-] Error: Script file could not be retrieved." -Color Red
+        return 
+    }
+
+    Write-ConsoleOutput -Text "[+] Executing: $LocalFile" -Color Green
+    Write-ConsoleOutput -Text "------------------------------------------------------------" -Color Gray
 
     try {
-        # Launching in an independent native console window.
-        # Uses -NoExit so administrators can interact with output after completion.
-        $StartInfo = @{
-            FilePath     = "powershell.exe"
-            ArgumentList = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$LocalFile`""
-            Verb         = "RunAs"
-            WindowStyle  = "Normal"
-        }
-
-        $Process = Start-Process @StartInfo -PassThru
-
-        Write-Host "[+] Process spawned successfully. (PID: $($Process.Id))" -ForegroundColor Green
-        Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+        & $LocalFile
     }
     catch {
-        Write-Host "[-] Execution Exception: $($_.Exception.Message)" -ForegroundColor Red
+        Write-ConsoleOutput -Text "[-] Execution Error: $($_.Exception.Message)" -Color Red
     }
 }
 
-# ============================================================
-# MAIN MENU LOOP
-# ============================================================
-
-function Show-MainMenu {
-    while ($true) {
-        Clear-Host
-        Write-Host "============================================================" -ForegroundColor Cyan
-        Write-Host "                IT Admin Toolkit Launcher                   " -ForegroundColor Cyan
-        Write-Host "============================================================" -ForegroundColor Cyan
-        Write-Host ""
-        Write-Host "  [1] Change Computer Name" -ForegroundColor Yellow
-        Write-Host "  [2] Additional Tool Placeholder" -ForegroundColor Yellow
-        Write-Host "  [Q] Quit" -ForegroundColor Red
-        Write-Host ""
-
-        $Selection = Read-Host "Select an option"
-
-        switch ($Selection.Trim().ToUpper()) {
-            "1" {
-                $Tool = [PSCustomObject]@{
-                    Name = "ChangeName"
-                    Path = "Subfolder/ChangeName.ps1"
-                }
-                Start-Tool -ToolScript $Tool
-                
-                # Critical State Cleanup: Clear variable to prevent auto-loading loop
-                $Tool = $null
-                Read-Host "`nPress Enter to return to main menu"
-            }
-            "2" {
-                Write-Host "[>] Placeholder selected." -ForegroundColor Gray
-                Read-Host "`nPress Enter to return to main menu"
-            }
-            "Q" {
-                Write-Host "[>] Exiting toolkit..." -ForegroundColor Gray
-                return
-            }
-            Default {
-                Write-Host "[!] Invalid selection, please try again." -ForegroundColor Yellow
-                Start-Sleep -Seconds 1
-            }
-        }
+# Define available toolkit scripts
+$Tools = @(
+    [PSCustomObject]@{
+        Name = "ChangeName"
+        Path = ".\Subfolder\ChangeName.ps1"
     }
+)
+
+# Main Execution Loop
+Clear-Host
+Write-ConsoleOutput -Text "========================================" -Color Cyan
+Write-ConsoleOutput -Text "        IT Admin Toolkit Main           " -Color Cyan
+Write-ConsoleOutput -Text "========================================" -Color Cyan
+Write-ConsoleOutput -Text ""
+
+for ($i = 0; $i -lt $Tools.Count; $i++) {
+    Write-ConsoleOutput -Text " [$($i + 1)] $($Tools[$i].Name)" -Color Yellow
 }
 
-# Execute Menu
-Show-MainMenu
+Write-ConsoleOutput -Text ""
+$Selection = Read-Host "Select a script to run (1-$($Tools.Count))"
+
+if ($Selection -match '^\d+$' -and [int]$Selection -ge 1 -and [int]$Selection -le $Tools.Count) {
+    $SelectedScript = $Tools[[int]$Selection - 1]
+    Start-Tool -Script $SelectedScript
+}
+else {
+    Write-ConsoleOutput -Text "[-] Invalid selection." -Color Red
+}
+
+Read-Host "`nPress Enter to exit"
