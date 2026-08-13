@@ -205,39 +205,42 @@ function Start-Tool {
     Write-ConsoleOutput -Text "[+] Executing: $LocalFile" -Color $ColorInfoFg
     Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
 
-    # Execute script asynchronously to prevent UI freeze
+    # Execute asynchronously inside a background task
     [System.Threading.Tasks.Task]::Run([Action]{
         try {
             $PowerShell = [PowerShell]::Create()
-            [void]$PowerShell.AddScript((Get-Content -Path $LocalFile -Raw))
+            
+            # Using AddScript with operator & ensures execution happens in its own scope 
+            # and non-interactive stream handling is enforced.
+            [void]$PowerShell.AddScript("& '$LocalFile'")
 
-            # Redirect Standard Output
+            # Redirect Standard Output Stream
             $PowerShell.Streams.Output.add_DataAdded({
                 param($sender, $e)
                 $Data = $sender[$e.Index]
                 Write-ConsoleOutput -Text "$Data" -Color $ColorConsoleFg
             })
 
-            # Redirect Error Output
+            # Redirect Error Output Stream
             $PowerShell.Streams.Error.add_DataAdded({
                 param($sender, $e)
                 $Data = $sender[$e.Index]
                 Write-ConsoleOutput -Text "[ERROR] $Data" -Color $ColorErrorFg
             })
 
-            # Redirect Warning Output
+            # Redirect Warning Stream
             $PowerShell.Streams.Warning.add_DataAdded({
                 param($sender, $e)
                 $Data = $sender[$e.Index]
                 Write-ConsoleOutput -Text "[WARN] $Data" -Color $ColorWarningFg
             })
 
-            # Execute Script
+            # Invoke asynchronously to guarantee non-blocking GUI performance
             [void]$PowerShell.Invoke()
             $PowerShell.Dispose()
 
             Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
-            Write-ConsoleOutput -Text "[+] Execution completed successfully." -Color $ColorInfoFg
+            Write-ConsoleOutput -Text "[+] Execution completed." -Color $ColorInfoFg
         }
         catch {
             Write-ConsoleOutput -Text "[-] Execution Exception: $($_.Exception.Message)" -Color $ColorErrorFg
