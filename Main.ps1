@@ -26,7 +26,10 @@ $MainScriptName = "Main.ps1"
 # HIDE POWERSHELL CONSOLE
 # ============================================================
 
-Add-Type -TypeDefinition @"
+# Check if the type is already compiled in the current AppDomain
+# to prevent 'Type name ConsoleWindow already exists' errors in VS Code/ISE.
+if (-not ([System.Management.Automation.PSTypeName]'ConsoleWindow').Type) {
+    Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 
@@ -38,13 +41,15 @@ public class ConsoleWindow {
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 }
 "@
+}
 
+# Retrieve console handle and hide window if running interactively
 $ConsoleHandle = [ConsoleWindow]::GetConsoleWindow()
 
 if ($ConsoleHandle -ne [IntPtr]::Zero) {
+    # 0 = SW_HIDE
     [ConsoleWindow]::ShowWindow($ConsoleHandle, 0)
 }
-
 # ============================================================
 # LOAD WINDOWS FORMS & DRAWING
 # ============================================================
