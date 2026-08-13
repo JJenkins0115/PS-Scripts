@@ -1,5 +1,5 @@
 # ============================================================
-# Main.ps1 - OPTIMIZED SCRIPT EXECUTION ENGINE
+# MAIN TOOL RUNNER - ASYNCHRONOUS NON-BLOCKING ENGINE
 # ============================================================
 
 function Start-Tool {
@@ -20,12 +20,13 @@ function Start-Tool {
     Write-ConsoleOutput -Text "[+] Executing: $LocalFile" -Color $ColorInfoFg
     Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
 
-    # Execute asynchronously inside a background process runner thread
+    # Execute inside a background thread pool task
     [System.Threading.Tasks.Task]::Run([Action]{
+        $Process = $null
         try {
             $PSI = New-Object System.Diagnostics.ProcessStartInfo
             $PSI.FileName               = "powershell.exe"
-            # -NoProfile -NonInteractive prevents loading user profile overhead and interactive console blocks
+            # -NoProfile -NonInteractive ensures clean startup and prevents stdin blocking
             $PSI.Arguments              = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$LocalFile`""
             $PSI.RedirectStandardOutput = $true
             $PSI.RedirectStandardError  = $true
@@ -35,43 +36,53 @@ function Start-Tool {
             $Process = New-Object System.Diagnostics.Process
             $Process.StartInfo = $PSI
 
-            if (-not $Process.Start()) {
-                Write-ConsoleOutput -Text "[-] Failed to launch PowerShell host process." -Color $ColorErrorFg
-                return
-            }
-
-            # ============================================================
-            # STREAM READER LOOP (Prevents Event Queue Thread Deadlocks)
-            # ============================================================
-            
-            # Read stdout line-by-line as it emits from the process stream
-            while (-not $Process.StandardOutput.EndOfStream) {
-                $Line = $Process.StandardOutput.ReadLine()
-                if ($null -ne $Line) {
-                    Write-ConsoleOutput -Text $Line -Color $ColorConsoleFg
+            # Scriptblock handlers for asynchronous data events
+            $OutHandler = [System.Diagnostics.DataReceivedEventHandler]{
+                param($sender, $eventArgs)
+                if (-not [string]::IsNullOrEmpty($eventArgs.Data)) {
+                    Write-ConsoleOutput -Text $eventArgs.Data -Color $ColorConsoleFg
                 }
             }
 
-            # Capture remaining error stream
-            $ErrorBuffer = $Process.StandardError.ReadToEnd()
-            if (-not [string]::IsNullOrWhiteSpace($ErrorBuffer)) {
-                Write-ConsoleOutput -Text "[ERROR] $ErrorBuffer" -Color $ColorErrorFg
+            $ErrHandler = [System.Diagnostics.DataReceivedEventHandler]{
+                param($sender, $eventArgs)
+                if (-not [string]::IsNullOrEmpty($eventArgs.Data)) {
+                    Write-ConsoleOutput -Text "[ERROR] $($eventArgs.Data)" -Color $ColorErrorFg
+                }
             }
 
+            # Attach .NET event handlers directly (bypasses PowerShell event subsystem)
+            $Process.add_OutputDataReceived($OutHandler)
+            $Process.add_ErrorDataReceived($ErrHandler)
+
+            if (-not $Process.Start()) {
+                Write-ConsoleOutput -Text "[-] Failed to start process: powershell.exe" -Color $ColorErrorFg
+                return
+            }
+
+            # Begin asynchronous stream reading on background threads
+            $Process.BeginOutputReadLine()
+            $Process.BeginErrorReadLine()
+
+            # Wait for process exit
             $Process.WaitForExit()
             $ExitCode = $Process.ExitCode
-            $Process.Dispose()
 
             Write-ConsoleOutput -Text "------------------------------------------------------------" -Color $ColorSubText
             if ($ExitCode -eq 0) {
-                Write-ConsoleOutput -Text "[+] Execution finished successfully (Exit Code: 0)." -Color $ColorInfoFg
+                Write-ConsoleOutput -Text "[+] Execution completed successfully." -Color $ColorInfoFg
             }
             else {
-                Write-ConsoleOutput -Text "[-] Execution finished with errors (Exit Code: $ExitCode)." -Color $ColorErrorFg
+                Write-ConsoleOutput -Text "[-] Execution finished with exit code $ExitCode." -Color $ColorErrorFg
             }
         }
         catch {
-            Write-ConsoleOutput -Text "[-] Execution Exception: $($_.Exception.Message)" -Color $ColorErrorFg
+            Write-ConsoleOutput -Text "[-] Process Execution Exception: $($_.Exception.Message)" -Color $ColorErrorFg
+        }
+        finally {
+            if ($null -ne $Process) {
+                $Process.Dispose()
+            }
         }
     }) | Out-Null
 }
