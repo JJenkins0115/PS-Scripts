@@ -1,24 +1,24 @@
 # ================================================================
 # Script Name:   MasterCleanScript.ps1
-# Description:   System Clean & Diagnostic Script (Dynamic Driver Store Engine)
-# Compatibility: PowerShell 5.1+, Visual Studio Code Terminal Host, Windows 10/11
+# Description:   System Clean & Diagnostic Script (Remote Pipeline Optimized)
+# Compatibility: PowerShell 5.1+, Visual Studio Code Terminal, GitHub iwr/iex
 # ================================================================
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
-# Force TLS 1.2 for secure GitHub REST API and download calls
+# Force TLS 1.2 to prevent download handshake failures in web execution streams
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 # ------------------------------------------------------------
-# 1. HELPER & TERMINAL OUTPUT FUNCTIONS
+# 1. HELPER & OUTPUT FUNCTIONS
 # ------------------------------------------------------------
 
 function Write-Status {
     <#
     .SYNOPSIS
-        Formats console output using structured ASCII indicator tags.
-        Avoids unicode emojis for max host compatibility (VS Code / Standard Host).
+        Formats terminal output using standard ASCII indicators.
+        Strictly avoids emojis to ensure cross-platform VS Code encoding safety.
     #>
     param(
         [Parameter(Mandatory = $true, Position = 0)]
@@ -38,7 +38,7 @@ function Write-Status {
 }
 
 function Test-IsAdministrator {
-    # Validates process elevation state before attempting system storage modifications
+    # Validates process elevation prior to running administrative system queries
     $Identity  = [Security.Principal.WindowsIdentity]::GetCurrent()
     $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
     return $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -47,8 +47,8 @@ function Test-IsAdministrator {
 function Test-IsValidZipArchive {
     <#
     .SYNOPSIS
-        Inspects the first 4 bytes of a file to verify standard ZIP magic bytes (0x50 0x4B 0x03 0x04).
-        Prevents Expand-Archive from attempting to extract HTML 404 pages or corrupted text streams.
+        Inspects file magic bytes (0x50 0x4B 0x03 0x04) to verify standard ZIP format.
+        Prevents downstream errors if GitHub returns an HTML error page.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -59,7 +59,6 @@ function Test-IsValidZipArchive {
 
     $FileStream = $null
     try {
-        # Open file in read mode to read file header
         $FileStream = [System.IO.File]::OpenRead($FilePath)
         if ($FileStream.Length -lt 4) { return $false }
 
@@ -68,7 +67,7 @@ function Test-IsValidZipArchive {
 
         if ($BytesRead -lt 4) { return $false }
 
-        # PK.. header signature check (50 4B 03 04)
+        # Check for standard PK header
         return ($Buffer[0] -eq 0x50 -and $Buffer[1] -eq 0x4B -and $Buffer[2] -eq 0x03 -and $Buffer[3] -eq 0x04)
     }
     catch {
@@ -83,39 +82,55 @@ function Test-IsValidZipArchive {
 }
 
 # ------------------------------------------------------------
-# 2. SYSTEM MAINTENANCE & CLEANUP FUNCTIONS
+# 2. SYSTEM MAINTENANCE FUNCTIONS
 # ------------------------------------------------------------
 
 function Get-BatteryHealth {
+    <#
+    .SYNOPSIS
+        Safe battery diagnostic check designed for desktop, laptop, and VM contexts under Strict Mode.
+    #>
     Write-Status -Message "Analyzing Battery Health..." -Type "INFO"
     $XmlPath = Join-Path -Path $env:TEMP -ChildPath "bat_report.xml"
 
     try {
         $BatCheck = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
         if (-not $BatCheck) {
-            Write-Status -Message "No battery detected (Desktop or Virtual Machine System)." -Type "INFO"
+            Write-Status -Message "No battery hardware detected (Desktop or Virtual Machine System)." -Type "INFO"
             return
         }
 
-        # Generate powercfg XML report silently
+        # Generate report XML quietly
         powercfg /batteryreport /output $XmlPath /xml | Out-Null
 
         if (Test-Path -Path $XmlPath) {
             [xml]$XmlReport = Get-Content -Path $XmlPath -ErrorAction Stop
-            $DesignCap = $XmlReport.BatteryReport.Batteries.Battery.DesignCapacity | Select-Object -First 1
-            $FullCap   = $XmlReport.BatteryReport.Batteries.Battery.FullChargeCapacity | Select-Object -First 1
 
-            if ($DesignCap -and $FullCap -and ([int64]$DesignCap -gt 0)) {
-                $Health = [math]::Round((([int64]$FullCap / [int64]$DesignCap) * 100), 1)
-                $StatusType = if ($Health -ge 80) { "SUCCESS" } elseif ($Health -ge 50) { "WARN" } else { "ERROR" }
+            # Safe XML node traversal to prevent crashes on non-standard ACPI systems
+            $BatteriesNode = $XmlReport.BatteryReport.Batteries
+            if ($null -ne $BatteriesNode -and $null -ne $BatteriesNode.Battery) {
+                $TargetBat = $BatteriesNode.Battery | Select-Object -First 1
 
-                Write-Status -Message "Battery Model: $($BatCheck.Name)" -Type "INFO"
-                Write-Status -Message "Battery Health: $Health% ($FullCap mWh / $DesignCap mWh)" -Type $StatusType
+                if ($null -ne $TargetBat -and $null -ne $TargetBat.DesignCapacity -and $null -ne $TargetBat.FullChargeCapacity) {
+                    $DesignCap = [int64]$TargetBat.DesignCapacity
+                    $FullCap   = [int64]$TargetBat.FullChargeCapacity
+
+                    if ($DesignCap -gt 0) {
+                        $Health = [math]::Round((($FullCap / $DesignCap) * 100), 1)
+                        $StatusType = if ($Health -ge 80) { "SUCCESS" } elseif ($Health -ge 50) { "WARN" } else { "ERROR" }
+
+                        Write-Status -Message "Battery Model: $($BatCheck.Name)" -Type "INFO"
+                        Write-Status -Message "Battery Health: $Health% ($FullCap mWh / $DesignCap mWh)" -Type $StatusType
+                    }
+                }
+            }
+            else {
+                Write-Status -Message "Battery report returned empty ACPI battery data structure." -Type "WARN"
             }
         }
     }
     catch {
-        Write-Status -Message "Battery Analysis Error: $($_.Exception.Message)" -Type "ERROR"
+        Write-Status -Message "Battery Analysis Warning: $($_.Exception.Message)" -Type "WARN"
     }
     finally {
         if (Test-Path -Path $XmlPath) { Remove-Item -Path $XmlPath -Force -ErrorAction SilentlyContinue }
@@ -123,7 +138,7 @@ function Get-BatteryHealth {
 }
 
 function Disable-Hibernation {
-    Write-Status -Message "Disabling Hibernation to reclaim system storage (hiberfil.sys)..." -Type "INFO"
+    Write-Status -Message "Disabling Hibernation to reclaim system storage..." -Type "INFO"
     try {
         powercfg /hibernate off
         Write-Status -Message "Hibernation disabled successfully." -Type "SUCCESS"
@@ -174,7 +189,6 @@ function Invoke-ExcessCleanup {
         Write-Status -Message "Temporary directories and service caches purged successfully." -Type "SUCCESS"
     }
     finally {
-        # Guaranteed service recovery regardless of cleanup errors
         Write-Status -Message "Restarting update services..." -Type "INFO"
         foreach ($Svc in $Services) {
             Start-Service -Name $Svc -ErrorAction SilentlyContinue
@@ -185,12 +199,12 @@ function Invoke-ExcessCleanup {
 function Invoke-DriverStoreCleanup {
     <#
     .SYNOPSIS
-        Dynamically downloads DriverStoreExplorer from GitHub REST API, verifies the
-        binary payload stream to avoid unzipping HTML error pages, and executes purge.
+        Downloads DriverStoreExplorer from GitHub, explicitly unblocks NTFS Mark-of-the-Web
+        streams, and executes background driver purging without extra UAC prompts.
     #>
     Write-Status -Message "Starting Driver Store and Orphaned File Maintenance..." -Type "INFO"
 
-    # 1. Orphaned Installer Scan
+    # 1. Orphaned Installer Check
     Write-Status -Message "Scanning for orphaned MSI/MSP installer files..." -Type "INFO"
     $InstallerPath = "C:\Windows\Installer"
 
@@ -212,12 +226,11 @@ function Invoke-DriverStoreCleanup {
         }
     }
 
-    # 2. Dynamic DriverStoreExplorer Download & Verification Setup
+    # 2. Download and Execute DriverStoreExplorer
     $ExtractPath = Join-Path -Path $env:TEMP -ChildPath "U40Tech\DriverStoreExplorer"
     $ZipPath     = Join-Path -Path $env:TEMP -ChildPath "U40Tech\DriverStoreExplorer.zip"
     $DownloadUrl = $null
 
-    # Retrieve latest asset URL dynamically via GitHub API to avoid dead 404 links
     try {
         Write-Status -Message "Querying GitHub API for latest DriverStoreExplorer release..." -Type "INFO"
         $ApiUrl   = "https://api.github.com/repos/lostindark/DriverStoreExplorer/releases/latest"
@@ -226,15 +239,12 @@ function Invoke-DriverStoreCleanup {
 
         if ($null -ne $ZipAsset) {
             $DownloadUrl = $ZipAsset.browser_download_url
-            Write-Status -Message "Resolved release URL: $DownloadUrl" -Type "INFO"
         }
     }
     catch {
-        pause
-        Write-Status -Message "GitHub API query failed ($($_.Exception.Message)). Attempting direct download endpoint..." -Type "WARN"
+        Write-Status -Message "GitHub API query failed. Falling back to release endpoint..." -Type "WARN"
     }
 
-    # Fallback to general release redirection if API call was unsuccessful
     if ([string]::IsNullOrWhiteSpace($DownloadUrl)) {
         $DownloadUrl = "https://github.com/lostindark/DriverStoreExplorer/releases/latest/download/DriverStoreExplorer.zip"
     }
@@ -244,61 +254,64 @@ function Invoke-DriverStoreCleanup {
             New-Item -Path $ExtractPath -ItemType Directory -Force | Out-Null
         }
 
-        # Download remote package asset
-        Write-Status -Message "Downloading DriverStoreExplorer package..." -Type "INFO"
+        Write-Status -Message "Downloading DriverStoreExplorer archive from GitHub..." -Type "INFO"
         Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipPath -UseBasicParsing -ErrorAction Stop
 
-        # Validate file integrity prior to calling Expand-Archive
+        # Remove Internet Zone identifier from remote file stream
+        Unblock-File -Path $ZipPath -ErrorAction SilentlyContinue
+
         if (-not (Test-IsValidZipArchive -FilePath $ZipPath)) {
-            throw "Downloaded asset is not a valid ZIP archive (received an HTML page or invalid payload). Check network or proxy settings."
+            throw "Downloaded file is not a valid ZIP archive. Validate internet connectivity or firewall rules."
         }
 
-        Write-Status -Message "Extracting binary archive..." -Type "INFO"
+        Write-Status -Message "Extracting binary package..." -Type "INFO"
         Expand-Archive -Path $ZipPath -DestinationPath $ExtractPath -Force -ErrorAction Stop
 
-        # Locate execution binary within target workspace
+        # Remove Internet Zone identifier from extracted binaries to prevent SmartScreen execution block
+        Get-ChildItem -Path $ExtractPath -Recurse -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
+
         $ExeFile = Get-ChildItem -Path $ExtractPath -Recurse -Filter "Rapr.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 
         if ($null -ne $ExeFile) {
             Write-Status -Message "Launching DriverStoreExplorer background process (/purge)..." -Type "INFO"
-            $DriverProcess = Start-Process -FilePath $ExeFile.FullName -ArgumentList "/purge" -Verb RunAs -PassThru
+
+            # Executed directly without -Verb RunAs since process is already elevated at main block
+            $DriverProcess = Start-Process -FilePath $ExeFile.FullName -ArgumentList "/purge" -PassThru
 
             if ($null -ne $DriverProcess) {
                 Write-Status -Message "Waiting for DriverStoreExplorer task completion..." -Type "INFO"
-
-                # Wait up to 5 minutes (300,000 ms) to avoid thread deadlock
                 $HasExited = $DriverProcess.WaitForExit(300000)
 
                 if ($HasExited) {
                     Write-Status -Message "Driver Store cleanup completed successfully." -Type "SUCCESS"
                 }
                 else {
-                    Write-Status -Message "Driver Store cleanup timed out. Terminating process handle." -Type "WARN"
+                    Write-Status -Message "Driver Store cleanup timed out. Terminating background process." -Type "WARN"
                     Stop-Process -Id $DriverProcess.Id -Force -ErrorAction SilentlyContinue
                 }
             }
         }
         else {
-            Write-Status -Message "Rapr.exe binary was not found inside extracted package." -Type "ERROR"
+            Write-Status -Message "Rapr.exe binary not found inside extracted archive." -Type "ERROR"
         }
     }
     catch {
         Write-Status -Message "Driver Store Maintenance Error: $($_.Exception.Message)" -Type "ERROR"
     }
     finally {
-        # Purge workspace directories
         if (Test-Path -Path $ZipPath)     { Remove-Item -Path $ZipPath -Force -ErrorAction SilentlyContinue }
         if (Test-Path -Path $ExtractPath) { Remove-Item -Path $ExtractPath -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
 # ------------------------------------------------------------
-# 3. APPLICATION ENTRY POINT
+# 3. MAIN EXECUTION PIPELINE
 # ------------------------------------------------------------
 
+# Require administrator elevation for web execution streams
 if (-not (Test-IsAdministrator)) {
-    Write-Status -Message "Administrative privileges required to run this script." -Type "ERROR"
-    Write-Status -Message "Relaunch PowerShell or VS Code as Administrator." -Type "WARN"
+    Write-Status -Message "Administrative privileges required to perform system maintenance tasks." -Type "ERROR"
+    Write-Status -Message "Please launch VS Code or PowerShell as Administrator before executing this script." -Type "WARN"
     exit 1
 }
 
@@ -322,6 +335,6 @@ Disable-Hibernation
 Invoke-ManualDiskCleanup
 Invoke-ExcessCleanup
 Invoke-DriverStoreCleanup
-pause
+
 Write-Host ""
 Write-Status -Message "Master maintenance tasks completed successfully." -Type "SUCCESS"
