@@ -11,6 +11,25 @@ $scriptStart = Get-Date
 $Global:ExecutionReport = [System.Collections.Generic.List[PSObject]]::new()
 $Global:StopRequested = $false
 
+function Invoke-MaintenanceTask {
+    param([string]$Name, [ScriptBlock]$Task)
+
+    if ($Global:StopRequested) {
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="SKIPPED" })
+        return
+    }
+
+    Write-Host "Executing: $Name" "INFO"
+    try {
+        & $Task
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="COMPLETED" })
+    } catch {
+        Write-Host "Error in $Name : $($_.Exception.Message)" "ERROR"
+        $Global:ExecutionReport.Add([PSCustomObject]@{ Task=$Name; Status="FAILED" })
+    }
+
+}
+
 # ------------------------------------------------------------
 # CLEANUP & DIAGNOSTIC FUNCTIONS
 # ------------------------------------------------------------
