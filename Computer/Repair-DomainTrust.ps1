@@ -134,6 +134,27 @@ else {
     Write-Host ""
     Write-Host "The computer account could not be repaired." -ForegroundColor Red
 }
+# -------------------------------------------------
+# Reset Windows LAPS password
+# -------------------------------------------------
+
+Write-Host ""
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "Resetting Windows LAPS password..." -ForegroundColor Cyan
+Write-Host "==========================================" -ForegroundColor Cyan
+
+try {
+    Reset-LapsPassword -ErrorAction Stop
+
+    Write-Host ""
+    Write-Host "SUCCESS: LAPS password rotation was triggered." -ForegroundColor Green
+    Write-Host "The new password should be available through your organization's LAPS management system."
+}
+catch {
+    Write-Host ""
+    Write-Host "ERROR: LAPS password reset failed." -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+}
 
 Write-Host ""
 Read-Host "Press ENTER to close"
