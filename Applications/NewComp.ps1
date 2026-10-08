@@ -4,6 +4,20 @@ Write-Host ""
         Write-Host "=============================================" -ForegroundColor Cyan
         Write-Host ""
 
+
+# ============================================================
+# SCRIPT SETTINGS
+# ============================================================
+
+# Domain account used to join computers to the domain
+$DomainUsername = "Techteam"
+
+# Prompt for password securely
+$DomainPassword = Read-Host `
+    -Prompt "Enter the domain password for $DomainUsername" `
+    -AsSecureString
+        
+
 function Start-SystemUpdates {
 
     $ModuleName = "PSWindowsUpdate"
@@ -610,9 +624,7 @@ function Add-ToDomain {
     # ---------------------------------------------------------
     # Password
     # ---------------------------------------------------------
-    $Password = Read-Host `
-        -Prompt "Enter domain password for $Username" `
-        -AsSecureString
+    $Password = $DomainPassword
 
 
     $Credential = New-Object `
