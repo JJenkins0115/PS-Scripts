@@ -108,32 +108,78 @@ function Start-SystemUpdates {
             Write-Host "[$Number] $($Update.Title)" `
                 -ForegroundColor White
 
+
             if ($Update.KB) {
-                Write-Host "     KB: $($Update.KB)" `
+
+                $KBText = @($Update.KB) -join ", "
+
+                Write-Host "     KB: $KBText" `
                     -ForegroundColor DarkGray
             }
 
-            if ($Update.Size) {
 
-                $SizeMB = [math]::Round(
-                    $Update.Size / 1MB,
-                    1
-                )
+            # -----------------------------------------------------
+            # Safely handle Size
+            # -----------------------------------------------------
+            if ($null -ne $Update.Size) {
 
-                Write-Host "     Size: $SizeMB MB" `
-                    -ForegroundColor DarkGray
+                try {
+
+                    # Convert any array of sizes into numeric values
+                    $Sizes = @(
+                        $Update.Size |
+                        ForEach-Object {
+                            if ($_ -is [int64] -or
+                                $_ -is [int32] -or
+                                $_ -is [double] -or
+                                $_ -is [decimal]) {
+
+                                [double]$_
+                            }
+                            elseif ($_ -as [double]) {
+
+                                [double]$_
+                            }
+                        }
+                    )
+
+                    if ($Sizes.Count -gt 0) {
+
+                        $TotalSize = ($Sizes | Measure-Object -Sum).Sum
+
+                        if ($TotalSize -gt 0) {
+
+                            $SizeMB = [math]::Round(
+                                ($TotalSize / 1MB),
+                                1
+                            )
+
+                            Write-Host "     Size: $SizeMB MB" `
+                                -ForegroundColor DarkGray
+                        }
+                    }
+                }
+                catch {
+                    # Ignore invalid size information
+                }
             }
 
+
+            # -----------------------------------------------------
+            # Detect driver
+            # -----------------------------------------------------
             if ($Update.Driver -eq $true) {
 
                 Write-Host "     Type: DRIVER" `
                     -ForegroundColor Yellow
             }
 
+
             Write-Host ""
 
             $Number++
         }
+
 
         Write-Host "Total updates queued: $($Updates.Count)" `
             -ForegroundColor Green
@@ -143,138 +189,71 @@ function Start-SystemUpdates {
 
         # ---------------------------------------------------------
         # Install updates
+        #
+        # IMPORTANT:
+        # Do NOT install each update individually by KB.
+        # This allows driver updates without KB numbers to work.
         # ---------------------------------------------------------
-        Write-Host "Installing updates..." -ForegroundColor Cyan
+        Write-Host "=============================================" `
+            -ForegroundColor Cyan
+
+        Write-Host "          INSTALLING UPDATES" `
+            -ForegroundColor Cyan
+
+        Write-Host "=============================================" `
+            -ForegroundColor Cyan
+
         Write-Host ""
 
-        $Total = $Updates.Count
-        $Completed = 0
+
+        # Start a simple overall progress indicator
+        Write-Progress `
+            -Activity "Installing Windows Updates" `
+            -Status "Starting update installation..." `
+            -PercentComplete 0
 
 
-        foreach ($Update in $Updates) {
-
-            $Completed++
-
-            $Title = $Update.Title
-
-            if ($Title.Length -gt 100) {
-                $DisplayTitle = $Title.Substring(0, 97) + "..."
-            }
-            else {
-                $DisplayTitle = $Title
-            }
-
-
-            $Percent = [math]::Round(
-                (($Completed - 1) / $Total) * 100
-            )
-
-
-            Write-Progress `
-                -Activity "Installing Windows Updates" `
-                -Status "Update $Completed of $Total" `
-                -CurrentOperation $DisplayTitle `
-                -PercentComplete $Percent
-
-
-            Write-Host ""
-            Write-Host "---------------------------------------------" `
-                -ForegroundColor DarkGray
-
-            Write-Host "Working on update $Completed of $Total" `
-                -ForegroundColor Cyan
-
-            Write-Host $Title `
-                -ForegroundColor White
-
-            if ($Update.KB) {
-                Write-Host "KB: $($Update.KB)" `
-                    -ForegroundColor DarkGray
-            }
-
-            if ($Update.Driver -eq $true) {
-                Write-Host "Type: DRIVER" `
-                    -ForegroundColor Yellow
-            }
-
-            Write-Host "---------------------------------------------" `
-                -ForegroundColor DarkGray
-
-
-            try {
-
-                # Install this specific update
-                if ($Update.KB) {
-
-                    Get-WindowsUpdate `
-                        -MicrosoftUpdate `
-                        -KBArticleID $Update.KB `
-                        -AcceptAll `
-                        -Install `
-                        -IgnoreReboot `
-                        -ErrorAction Stop |
-                        Out-Null
-
-                }
-                else {
-
-                    # Some driver updates may not expose a KB
-                    Get-WindowsUpdate `
-                        -MicrosoftUpdate `
-                        -AcceptAll `
-                        -Install `
-                        -IgnoreReboot `
-                        -ErrorAction Stop |
-                        Out-Null
-                }
-
-
-                Write-Host "Completed successfully." `
-                    -ForegroundColor Green
-
-            }
-            catch {
-
-                Write-Host "FAILED" -ForegroundColor Red
-                Write-Host $_.Exception.Message `
-                    -ForegroundColor Red
-            }
-
-
-            $Percent = [math]::Round(
-                ($Completed / $Total) * 100
-            )
-
-
-            Write-Progress `
-                -Activity "Installing Windows Updates" `
-                -Status "Completed $Completed of $Total" `
-                -CurrentOperation $DisplayTitle `
-                -PercentComplete $Percent
-        }
+        Get-WindowsUpdate `
+            -MicrosoftUpdate `
+            -AcceptAll `
+            -Install `
+            -IgnoreReboot `
+            -Verbose `
+            -ErrorAction Stop
 
 
         Write-Progress `
             -Activity "Installing Windows Updates" `
             -Status "Update installation complete" `
-            -PercentComplete 100 `
+            -PercentComplete 100
+
+
+        Start-Sleep -Seconds 1
+
+
+        Write-Progress `
+            -Activity "Installing Windows Updates" `
             -Completed
 
 
         # ---------------------------------------------------------
-        # Check if Windows needs a reboot
+        # Check whether Windows requires reboot
         # ---------------------------------------------------------
         $RebootRequired = $false
+
 
         $RebootKeys = @(
             "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
             "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
         )
 
+
         foreach ($Key in $RebootKeys) {
 
             if (Test-Path $Key) {
+
                 $RebootRequired = $true
+                break
             }
         }
 
@@ -291,21 +270,22 @@ function Start-SystemUpdates {
 
         Write-Host ""
 
+
         if ($RebootRequired) {
 
-            Write-Host "Windows requires a restart to finalize updates." `
+            Write-Host "A restart is required to finalize updates." `
                 -ForegroundColor Yellow
 
         }
         else {
 
-            Write-Host "No reboot is currently required." `
+            Write-Host "No restart is currently required." `
                 -ForegroundColor Green
         }
 
         Write-Host ""
 
-        # Return whether a reboot is needed
+
         return $RebootRequired
     }
     catch {
@@ -313,6 +293,7 @@ function Start-SystemUpdates {
         Write-Progress `
             -Activity "Installing Windows Updates" `
             -Completed
+
 
         Write-Host ""
         Write-Host "Windows Update encountered an error:" `
@@ -322,6 +303,7 @@ function Start-SystemUpdates {
             -ForegroundColor Red
 
         Write-Host ""
+
 
         return $false
     }
