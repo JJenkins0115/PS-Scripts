@@ -1,3 +1,9 @@
+Write-Host ""
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host "          NewCompV2  11:56   " -ForegroundColor Cyan
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host ""
+
 function Start-SystemUpdates {
 
     $ModuleName = "PSWindowsUpdate"
