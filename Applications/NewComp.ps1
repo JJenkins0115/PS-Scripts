@@ -613,8 +613,7 @@ function Add-ToDomain {
     # ---------------------------------------------------------
     Write-Host ""
 
-    $Username = Read-Host `
-        "Enter domain username [Techteam]"
+    $Username = $DomainUsername
 
     if ([string]::IsNullOrWhiteSpace($Username)) {
         $Username = "Techteam"
