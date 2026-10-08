@@ -1,25 +1,323 @@
 function Start-SystemUpdates {
+
     $ModuleName = "PSWindowsUpdate"
-    
+
     try {
-        # 1. Force NuGet Provider installation
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
 
-        # 2. Set PSGallery to Trusted
+        Write-Host ""
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host "          WINDOWS UPDATE PROCESS" -ForegroundColor Cyan
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        # ---------------------------------------------------------
+        # 1. Install NuGet
+        # ---------------------------------------------------------
+        Write-Host "[1/4] Checking NuGet provider..." -ForegroundColor Yellow
+
+        Install-PackageProvider `
+            -Name NuGet `
+            -MinimumVersion 2.8.5.201 `
+            -Force `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue |
+            Out-Null
+
+
+        # ---------------------------------------------------------
+        # 2. Trust PSGallery
+        # ---------------------------------------------------------
+        Write-Host "[2/4] Checking PowerShell Gallery..." -ForegroundColor Yellow
+
         if (Get-PSRepository -Name "PSGallery" -ErrorAction SilentlyContinue) {
-            Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+
+            Set-PSRepository `
+                -Name "PSGallery" `
+                -InstallationPolicy Trusted `
+                -ErrorAction SilentlyContinue
         }
 
-        # 3. Install the Module
+
+        # ---------------------------------------------------------
+        # 3. Install PSWindowsUpdate
+        # ---------------------------------------------------------
+        Write-Host "[3/4] Checking PSWindowsUpdate..." -ForegroundColor Yellow
+
         if (-not (Get-Module -ListAvailable $ModuleName)) {
-            Install-Module $ModuleName -Force -Confirm:$false -Scope AllUsers -AllowClobber -ErrorAction Stop | Out-Null
+
+            Write-Host "Installing PSWindowsUpdate..." -ForegroundColor Cyan
+
+            Install-Module `
+                $ModuleName `
+                -Force `
+                -Confirm:$false `
+                -Scope AllUsers `
+                -AllowClobber `
+                -ErrorAction Stop
         }
-        
-        # 4. Import and Execute Updates
+
         Import-Module $ModuleName -ErrorAction Stop
-        Get-WindowsUpdate -AcceptAll -Install -IgnoreReboot -MicrosoftUpdate -ErrorAction SilentlyContinue
-    } catch { 
-        Write-Error "Update process encountered an error: $($_.Exception.Message)"
+
+
+        # ---------------------------------------------------------
+        # 4. Scan for updates
+        # ---------------------------------------------------------
+        Write-Host "[4/4] Checking Microsoft Update..." -ForegroundColor Yellow
+        Write-Host ""
+
+        $Updates = @(
+            Get-WindowsUpdate `
+                -MicrosoftUpdate `
+                -ErrorAction Stop
+        )
+
+
+        # ---------------------------------------------------------
+        # No updates
+        # ---------------------------------------------------------
+        if ($Updates.Count -eq 0) {
+
+            Write-Host ""
+            Write-Host "No updates are currently available." `
+                -ForegroundColor Green
+
+            Write-Host ""
+
+            return $false
+        }
+
+
+        # ---------------------------------------------------------
+        # Display queued updates
+        # ---------------------------------------------------------
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host "            UPDATES QUEUED" -ForegroundColor Cyan
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        $Number = 1
+
+        foreach ($Update in $Updates) {
+
+            Write-Host "[$Number] $($Update.Title)" `
+                -ForegroundColor White
+
+            if ($Update.KB) {
+                Write-Host "     KB: $($Update.KB)" `
+                    -ForegroundColor DarkGray
+            }
+
+            if ($Update.Size) {
+
+                $SizeMB = [math]::Round(
+                    $Update.Size / 1MB,
+                    1
+                )
+
+                Write-Host "     Size: $SizeMB MB" `
+                    -ForegroundColor DarkGray
+            }
+
+            if ($Update.Driver -eq $true) {
+
+                Write-Host "     Type: DRIVER" `
+                    -ForegroundColor Yellow
+            }
+
+            Write-Host ""
+
+            $Number++
+        }
+
+        Write-Host "Total updates queued: $($Updates.Count)" `
+            -ForegroundColor Green
+
+        Write-Host ""
+
+
+        # ---------------------------------------------------------
+        # Install updates
+        # ---------------------------------------------------------
+        Write-Host "Installing updates..." -ForegroundColor Cyan
+        Write-Host ""
+
+        $Total = $Updates.Count
+        $Completed = 0
+
+
+        foreach ($Update in $Updates) {
+
+            $Completed++
+
+            $Title = $Update.Title
+
+            if ($Title.Length -gt 100) {
+                $DisplayTitle = $Title.Substring(0, 97) + "..."
+            }
+            else {
+                $DisplayTitle = $Title
+            }
+
+
+            $Percent = [math]::Round(
+                (($Completed - 1) / $Total) * 100
+            )
+
+
+            Write-Progress `
+                -Activity "Installing Windows Updates" `
+                -Status "Update $Completed of $Total" `
+                -CurrentOperation $DisplayTitle `
+                -PercentComplete $Percent
+
+
+            Write-Host ""
+            Write-Host "---------------------------------------------" `
+                -ForegroundColor DarkGray
+
+            Write-Host "Working on update $Completed of $Total" `
+                -ForegroundColor Cyan
+
+            Write-Host $Title `
+                -ForegroundColor White
+
+            if ($Update.KB) {
+                Write-Host "KB: $($Update.KB)" `
+                    -ForegroundColor DarkGray
+            }
+
+            if ($Update.Driver -eq $true) {
+                Write-Host "Type: DRIVER" `
+                    -ForegroundColor Yellow
+            }
+
+            Write-Host "---------------------------------------------" `
+                -ForegroundColor DarkGray
+
+
+            try {
+
+                # Install this specific update
+                if ($Update.KB) {
+
+                    Get-WindowsUpdate `
+                        -MicrosoftUpdate `
+                        -KBArticleID $Update.KB `
+                        -AcceptAll `
+                        -Install `
+                        -IgnoreReboot `
+                        -ErrorAction Stop |
+                        Out-Null
+
+                }
+                else {
+
+                    # Some driver updates may not expose a KB
+                    Get-WindowsUpdate `
+                        -MicrosoftUpdate `
+                        -AcceptAll `
+                        -Install `
+                        -IgnoreReboot `
+                        -ErrorAction Stop |
+                        Out-Null
+                }
+
+
+                Write-Host "Completed successfully." `
+                    -ForegroundColor Green
+
+            }
+            catch {
+
+                Write-Host "FAILED" -ForegroundColor Red
+                Write-Host $_.Exception.Message `
+                    -ForegroundColor Red
+            }
+
+
+            $Percent = [math]::Round(
+                ($Completed / $Total) * 100
+            )
+
+
+            Write-Progress `
+                -Activity "Installing Windows Updates" `
+                -Status "Completed $Completed of $Total" `
+                -CurrentOperation $DisplayTitle `
+                -PercentComplete $Percent
+        }
+
+
+        Write-Progress `
+            -Activity "Installing Windows Updates" `
+            -Status "Update installation complete" `
+            -PercentComplete 100 `
+            -Completed
+
+
+        # ---------------------------------------------------------
+        # Check if Windows needs a reboot
+        # ---------------------------------------------------------
+        $RebootRequired = $false
+
+        $RebootKeys = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
+        )
+
+        foreach ($Key in $RebootKeys) {
+
+            if (Test-Path $Key) {
+                $RebootRequired = $true
+            }
+        }
+
+
+        Write-Host ""
+        Write-Host "=============================================" `
+            -ForegroundColor Green
+
+        Write-Host "          UPDATE PROCESS COMPLETE" `
+            -ForegroundColor Green
+
+        Write-Host "=============================================" `
+            -ForegroundColor Green
+
+        Write-Host ""
+
+        if ($RebootRequired) {
+
+            Write-Host "Windows requires a restart to finalize updates." `
+                -ForegroundColor Yellow
+
+        }
+        else {
+
+            Write-Host "No reboot is currently required." `
+                -ForegroundColor Green
+        }
+
+        Write-Host ""
+
+        # Return whether a reboot is needed
+        return $RebootRequired
+    }
+    catch {
+
+        Write-Progress `
+            -Activity "Installing Windows Updates" `
+            -Completed
+
+        Write-Host ""
+        Write-Host "Windows Update encountered an error:" `
+            -ForegroundColor Red
+
+        Write-Host $_.Exception.Message `
+            -ForegroundColor Red
+
+        Write-Host ""
+
+        return $false
     }
 }
 
@@ -32,8 +330,9 @@ function Add-ToDomain {
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host ""
 
+
     # ---------------------------------------------------------
-    # Get DNS servers currently being used
+    # Get DNS servers
     # ---------------------------------------------------------
     $DnsServers = @(
         Get-DnsClientServerAddress -AddressFamily IPv4 |
@@ -46,12 +345,15 @@ function Add-ToDomain {
         Sort-Object -Unique
     )
 
+
     if ($DnsServers.Count -eq 0) {
 
-        Write-Host "No DNS servers were found." -ForegroundColor Red
-        Write-Host ""
-        return
+        Write-Host "No DNS servers were found." `
+            -ForegroundColor Red
+
+        return $false
     }
+
 
     Write-Host "DNS servers found:" -ForegroundColor Yellow
 
@@ -60,6 +362,7 @@ function Add-ToDomain {
     }
 
     Write-Host ""
+
 
     # ---------------------------------------------------------
     # Get DNS suffixes
@@ -80,18 +383,23 @@ function Add-ToDomain {
         Sort-Object -Unique
     )
 
+
     # ---------------------------------------------------------
     # Find Active Directory domains
     # ---------------------------------------------------------
     $FoundDomains = @()
 
+
     foreach ($Dns in $DnsServers) {
 
-        Write-Host "Searching DNS server $Dns..." -ForegroundColor Cyan
+        Write-Host "Searching DNS server $Dns..." `
+            -ForegroundColor Cyan
+
 
         foreach ($Suffix in $DnsSuffixes) {
 
-            Write-Host "  Checking $Suffix..." -ForegroundColor DarkGray
+            Write-Host "  Checking $Suffix..." `
+                -ForegroundColor DarkGray
 
             try {
 
@@ -101,42 +409,48 @@ function Add-ToDomain {
                     -Server $Dns `
                     -ErrorAction Stop
 
+
                 if ($LDAPRecords) {
 
-                    Write-Host "  Active Directory found!" -ForegroundColor Green
+                    Write-Host "  Active Directory found!" `
+                        -ForegroundColor Green
+
 
                     if ($Suffix -notin $FoundDomains) {
                         $FoundDomains += $Suffix
                     }
 
+
                     foreach ($Record in $LDAPRecords) {
 
                         if ($Record.NameTarget) {
 
-                            Write-Host "    Domain Controller: $($Record.NameTarget)" `
+                            Write-Host `
+                                "    Domain Controller: $($Record.NameTarget)" `
                                 -ForegroundColor Gray
                         }
                     }
                 }
             }
             catch {
-                # No LDAP record for this suffix
+                # No AD record for this suffix
             }
         }
     }
 
+
     # ---------------------------------------------------------
-    # If no domain was found using the local suffix,
-    # try using the DNS server's hostname.
+    # Reverse DNS fallback
     # ---------------------------------------------------------
     if ($FoundDomains.Count -eq 0) {
 
         Write-Host ""
-        Write-Host "No domain found from local DNS suffixes." `
+        Write-Host "No domain found from DNS suffixes." `
             -ForegroundColor Yellow
 
-        Write-Host "Attempting reverse DNS discovery..." `
+        Write-Host "Trying reverse DNS discovery..." `
             -ForegroundColor Cyan
+
 
         foreach ($Dns in $DnsServers) {
 
@@ -147,17 +461,21 @@ function Add-ToDomain {
                     -Type PTR `
                     -ErrorAction Stop
 
+
                 foreach ($Record in $Reverse) {
 
                     if ($Record.NameHost) {
 
                         $Hostname = $Record.NameHost.TrimEnd(".")
 
-                        Write-Host "DNS server hostname: $Hostname" `
+
+                        Write-Host `
+                            "DNS server hostname: $Hostname" `
                             -ForegroundColor Gray
 
-                        # Get everything after the first hostname component
+
                         $Parts = $Hostname.Split(".")
+
 
                         if ($Parts.Count -ge 2) {
 
@@ -165,8 +483,11 @@ function Add-ToDomain {
                                 $Parts[1..($Parts.Count - 1)] -join "."
                             )
 
-                            Write-Host "Testing possible domain: $PossibleDomain" `
+
+                            Write-Host `
+                                "Testing possible domain: $PossibleDomain" `
                                 -ForegroundColor Cyan
+
 
                             try {
 
@@ -176,10 +497,13 @@ function Add-ToDomain {
                                     -Server $Dns `
                                     -ErrorAction Stop
 
+
                                 if ($LDAPRecords) {
 
-                                    Write-Host "  Active Directory found!" `
+                                    Write-Host `
+                                        "Active Directory found!" `
                                         -ForegroundColor Green
+
 
                                     if ($PossibleDomain -notin $FoundDomains) {
                                         $FoundDomains += $PossibleDomain
@@ -199,47 +523,43 @@ function Add-ToDomain {
         }
     }
 
+
     # ---------------------------------------------------------
-    # No domains found
+    # No domain found
     # ---------------------------------------------------------
     if ($FoundDomains.Count -eq 0) {
 
         Write-Host ""
-        Write-Host "=============================================" -ForegroundColor Red
-        Write-Host "       NO ACTIVE DIRECTORY DOMAIN FOUND" -ForegroundColor Red
-        Write-Host "=============================================" -ForegroundColor Red
-        Write-Host ""
-
-        Write-Host "DNS servers detected:" -ForegroundColor Yellow
-
-        foreach ($Dns in $DnsServers) {
-            Write-Host "  $Dns" -ForegroundColor Gray
-        }
-
-        Write-Host ""
-
-        Write-Host "Unable to locate an Active Directory domain." `
+        Write-Host "No Active Directory domain was found." `
             -ForegroundColor Red
 
-        return
+        Write-Host ""
+
+        return $false
     }
 
-    # ---------------------------------------------------------
-    # Remove duplicates
-    # ---------------------------------------------------------
+
     $FoundDomains = @(
         $FoundDomains |
         Sort-Object -Unique
     )
 
+
     # ---------------------------------------------------------
-    # Display domains found
+    # Select domain
     # ---------------------------------------------------------
     Write-Host ""
-    Write-Host "=============================================" -ForegroundColor Green
-    Write-Host "          DOMAINS FOUND" -ForegroundColor Green
-    Write-Host "=============================================" -ForegroundColor Green
+    Write-Host "=============================================" `
+        -ForegroundColor Green
+
+    Write-Host "          DOMAINS FOUND" `
+        -ForegroundColor Green
+
+    Write-Host "=============================================" `
+        -ForegroundColor Green
+
     Write-Host ""
+
 
     for ($i = 0; $i -lt $FoundDomains.Count; $i++) {
 
@@ -249,17 +569,13 @@ function Add-ToDomain {
 
     Write-Host ""
 
-    # ---------------------------------------------------------
-    # Select domain
-    # ---------------------------------------------------------
+
     if ($FoundDomains.Count -eq 1) {
 
         $Domain = $FoundDomains[0]
 
-        Write-Host "Domain automatically selected:" `
-            -ForegroundColor Cyan
-
-        Write-Host "  $Domain" -ForegroundColor Green
+        Write-Host "Domain automatically selected: $Domain" `
+            -ForegroundColor Green
     }
     else {
 
@@ -279,23 +595,29 @@ function Add-ToDomain {
             ) {
 
                 $Domain = $FoundDomains[$SelectionNumber - 1]
+
                 break
             }
 
-            Write-Host "Invalid selection." -ForegroundColor Red
+            Write-Host "Invalid selection." `
+                -ForegroundColor Red
 
         } while ($true)
     }
+
 
     # ---------------------------------------------------------
     # Username
     # ---------------------------------------------------------
     Write-Host ""
-    $Username = Read-Host "Enter domain username [Techteam]"
+
+    $Username = Read-Host `
+        "Enter domain username [Techteam]"
 
     if ([string]::IsNullOrWhiteSpace($Username)) {
         $Username = "Techteam"
     }
+
 
     # ---------------------------------------------------------
     # Password
@@ -304,64 +626,136 @@ function Add-ToDomain {
         -Prompt "Enter domain password for $Username" `
         -AsSecureString
 
-    $Credential = New-Object System.Management.Automation.PSCredential(
-        "$Domain\$Username",
-        $Password
-    )
+
+    $Credential = New-Object `
+        System.Management.Automation.PSCredential(
+            "$Domain\$Username",
+            $Password
+        )
+
 
     # ---------------------------------------------------------
-    # Confirmation
+    # Confirm
     # ---------------------------------------------------------
     Write-Host ""
-    Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "          DOMAIN JOIN CONFIRMATION" -ForegroundColor Cyan
-    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host "=============================================" `
+        -ForegroundColor Cyan
+
+    Write-Host "          DOMAIN JOIN CONFIRMATION" `
+        -ForegroundColor Cyan
+
+    Write-Host "=============================================" `
+        -ForegroundColor Cyan
+
     Write-Host ""
+
     Write-Host "Domain:   $Domain" -ForegroundColor White
     Write-Host "Username: $Username" -ForegroundColor White
+
     Write-Host ""
 
+
     $Confirm = Read-Host `
-        "Join this computer to $Domain and restart? (Y/N)"
+        "Join this computer to $Domain? (Y/N)"
+
 
     if ($Confirm -notmatch "^[Yy]$") {
 
         Write-Host ""
-        Write-Host "Domain join cancelled." -ForegroundColor Yellow
-        return
+        Write-Host "Domain join cancelled." `
+            -ForegroundColor Yellow
+
+        return $false
     }
 
+
     # ---------------------------------------------------------
-    # Join domain
+    # Join domain WITHOUT restarting
     # ---------------------------------------------------------
     Write-Host ""
-    Write-Host "Joining $Domain..." -ForegroundColor Yellow
-    Write-Host ""
+    Write-Host "Joining $Domain..." `
+        -ForegroundColor Yellow
 
     try {
 
         Add-Computer `
             -DomainName $Domain `
             -Credential $Credential `
-            -Restart `
-            -Force
+            -Force `
+            -ErrorAction Stop
+
+
+        Write-Host ""
+        Write-Host "Computer successfully joined to $Domain." `
+            -ForegroundColor Green
+
+        Write-Host "The computer will NOT restart yet." `
+            -ForegroundColor Yellow
+
+        return $true
     }
     catch {
 
         Write-Host ""
-        Write-Host "Failed to join domain." -ForegroundColor Red
-        Write-Host ""
-        Write-Host $_.Exception.Message -ForegroundColor Red
+        Write-Host "Failed to join domain." `
+            -ForegroundColor Red
+
+        Write-Host $_.Exception.Message `
+            -ForegroundColor Red
+
+        return $false
     }
 }
 
 
-# ============================================================
-# SCRIPT EXECUTION
-# ============================================================
+# =============================================================
+# MAIN SCRIPT
+# =============================================================
 
-# 1. Run Windows Updates
-Start-SystemUpdates
+# -------------------------------------------------------------
+# 1. Install Windows Updates
+# -------------------------------------------------------------
+$RebootRequired = Start-SystemUpdates
 
-# 2. Add computer to domain and restart
-Add-ToDomain
+
+# -------------------------------------------------------------
+# 2. Join the computer to the domain
+# -------------------------------------------------------------
+$DomainJoined = Add-ToDomain
+
+
+# -------------------------------------------------------------
+# 3. Final reboot
+# -------------------------------------------------------------
+if ($RebootRequired -or $DomainJoined) {
+
+    Write-Host ""
+    Write-Host "=============================================" `
+        -ForegroundColor Yellow
+
+    Write-Host "          FINAL RESTART" `
+        -ForegroundColor Yellow
+
+    Write-Host "=============================================" `
+        -ForegroundColor Yellow
+
+    Write-Host ""
+
+    Write-Host "Updates will be finalized and the domain join" `
+        -ForegroundColor White
+
+    Write-Host "will be completed after the restart." `
+        -ForegroundColor White
+
+    Write-Host ""
+
+    Start-Sleep -Seconds 5
+
+    Restart-Computer -Force
+}
+else {
+
+    Write-Host ""
+    Write-Host "No restart is required." `
+        -ForegroundColor Green
+}
