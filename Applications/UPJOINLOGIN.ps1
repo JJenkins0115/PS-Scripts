@@ -1,4 +1,3 @@
-```powershell
 # ============================================================
 # WINDOWS UPDATE + DOMAIN JOIN + ONE-TIME AUTOLOGON
 # ============================================================
@@ -1006,4 +1005,3 @@ Write-Host ""
 Start-Sleep -Seconds 10
 
 Restart-Computer -Force
-```
