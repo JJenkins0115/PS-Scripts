@@ -1,12 +1,7 @@
 # ============================================================
 # COMPUTER SERIAL NUMBER AND DEVICE NUMBER VALIDATION
-# Rename mismatched computers and restart automatically
+# Interactive device identification and computer renaming
 # ============================================================
-
-# ------------------------------------------------------------
-# SERIAL NUMBER TO DEVICE NUMBER LIST
-# Format: "SERIALNUMBER" = "DEVICENUMBER"
-# ------------------------------------------------------------
 
 $List = @{
 "5CG402058G"= '13428'
@@ -1908,13 +1903,8 @@ $List = @{
 "1H95291C67"= '15124'
 "1H952910ZZ"= '15126'
 "1H95291155"= '15129'
-
-    # ADD THE REST OF YOUR DEVICES HERE
 }
 
-# ------------------------------------------------------------
-# FUNCTION: TEST AND CORRECT COMPUTER NAME
-# ------------------------------------------------------------
 
 function Test-ComputerDeviceNumber {
 
@@ -1924,10 +1914,10 @@ function Test-ComputerDeviceNumber {
     )
 
     Write-Host "`n============================================================" -ForegroundColor Cyan
-    Write-Host "       COMPUTER IDENTITY VALIDATION" -ForegroundColor Cyan
+    Write-Host "         COMPUTER IDENTITY VALIDATION" -ForegroundColor Cyan
     Write-Host "============================================================" -ForegroundColor Cyan
 
-    # GET COMPUTER SERIAL NUMBER
+    # GET BIOS SERIAL NUMBER
     try {
         $SerialNumber = (
             Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop
@@ -1939,40 +1929,31 @@ function Test-ComputerDeviceNumber {
         return $false
     }
 
-    # GET CURRENT COMPUTER NAME
     $ComputerName = $env:COMPUTERNAME
 
-    Write-Host "Current Computer Name: $ComputerName"
-    Write-Host "BIOS Serial Number:    $SerialNumber"
+    Write-Host "`nCurrent Computer Name : $ComputerName" -ForegroundColor White
+    Write-Host "BIOS Serial Number    : $SerialNumber" -ForegroundColor White
 
-    # CHECK SERIAL NUMBER AGAINST DEVICE LIST
+    # LOOK UP DEVICE NUMBER USING SERIAL NUMBER
     if (-not $List.ContainsKey($SerialNumber)) {
-        Write-Host "`nWARNING: Serial number not found in the device list!" -ForegroundColor Red
+        Write-Host "`nERROR: Serial number not found in the device list!" -ForegroundColor Red
         Write-Host "Add '$SerialNumber' and its device number to the `$List variable." -ForegroundColor Yellow
         return $false
     }
 
-    # GET EXPECTED DEVICE NUMBER
     $ExpectedDeviceNumber = [string]$List[$SerialNumber]
 
-    Write-Host "Expected Device Number: $ExpectedDeviceNumber" -ForegroundColor Cyan
+    Write-Host "Device Number         : $ExpectedDeviceNumber" -ForegroundColor Cyan
 
-    # CHECK WHETHER CURRENT COMPUTER NAME ENDS WITH EXPECTED NUMBER
+    # CHECK WHETHER COMPUTER NAME ALREADY ENDS WITH DEVICE NUMBER
     if ($ComputerName.EndsWith(
         $ExpectedDeviceNumber,
         [System.StringComparison]::OrdinalIgnoreCase
     )) {
-        Write-Host "`nSUCCESS: Computer name matches the expected device number." -ForegroundColor Green
+        Write-Host "`nSUCCESS: Computer name already matches the expected device number." -ForegroundColor Green
+        Start-Sleep 3
         return $true
     }
-
-    # --------------------------------------------------------
-    # DEVICE NUMBER MISMATCH: PROMPT USER FOR NAME PREFIX
-    # --------------------------------------------------------
-
-    Write-Host "`nWARNING: DEVICE NUMBER MISMATCH!" -ForegroundColor Red
-    Write-Host "Current Computer Name: $ComputerName" -ForegroundColor Yellow
-    Write-Host "Expected Device Number: $ExpectedDeviceNumber" -ForegroundColor Cyan
 
     # CHECK ADMINISTRATOR PRIVILEGES
     $IsAdministrator = (
@@ -1988,44 +1969,57 @@ function Test-ComputerDeviceNumber {
         return $false
     }
 
-    # PROMPT FOR THE PREFIX
+    # PROMPT USER FOR NAME PREFIX ONLY
     do {
-        $NamePrefix = Read-Host "`nEnter the computer name prefix (example: EHS)"
+        $NamePrefix = Read-Host "`nEnter the name/prefix to place before device number $ExpectedDeviceNumber (example: EHS)"
 
         if ([string]::IsNullOrWhiteSpace($NamePrefix)) {
-            Write-Host "The prefix cannot be blank. Please try again." -ForegroundColor Yellow
+            Write-Host "Name prefix cannot be blank. Please try again." -ForegroundColor Yellow
             continue
         }
 
-        # Remove accidental spaces at the beginning/end
         $NamePrefix = $NamePrefix.Trim()
 
-        # BUILD THE NEW COMPUTER NAME
+        # BUILD NEW COMPUTER NAME
         $NewComputerName = "$NamePrefix$ExpectedDeviceNumber"
 
-        # Windows computer names are limited to 15 characters
+        # WINDOWS COMPUTER NAME LIMIT: 15 CHARACTERS
         if ($NewComputerName.Length -gt 15) {
-            Write-Host "The computer name cannot exceed 15 characters. Try a shorter prefix." -ForegroundColor Yellow
+            Write-Host "Computer name cannot exceed 15 characters." -ForegroundColor Red
+            Write-Host "Please enter a shorter prefix." -ForegroundColor Yellow
             $NamePrefix = ""
+            continue
         }
-        elseif ($NewComputerName -notmatch '^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$') {
-            Write-Host "Use only letters, numbers, and hyphens. The name cannot start or end with a hyphen." -ForegroundColor Yellow
+
+        # VALIDATE COMPUTER NAME CHARACTERS
+        if ($NewComputerName -notmatch '^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$') {
+            Write-Host "Invalid name. Use letters, numbers, and hyphens only." -ForegroundColor Yellow
+            Write-Host "The name cannot start or end with a hyphen." -ForegroundColor Yellow
             $NamePrefix = ""
+            continue
         }
-        else {
-            break
-        }
+
+        break
 
     } while ($true)
 
-    Write-Host "`nNew Computer Name: $NewComputerName" -ForegroundColor Cyan
+    # DISPLAY PROPOSED NAME
+    Write-Host "`n============================================================" -ForegroundColor Cyan
+    Write-Host "                 COMPUTER RENAME SUMMARY" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
 
-    # CONFIRM THE CHANGE
-    $Confirmation = Read-Host "Rename this computer to '$NewComputerName'? (Y/N)"
+    Write-Host "Serial Number     : $SerialNumber" -ForegroundColor White
+    Write-Host "Device Number     : $ExpectedDeviceNumber" -ForegroundColor White
+    Write-Host "Name Prefix       : $NamePrefix" -ForegroundColor White
+    Write-Host "Current Name      : $ComputerName" -ForegroundColor Yellow
+    Write-Host "New Computer Name : $NewComputerName" -ForegroundColor Green
+
+    # CONFIRM RENAME
+    $Confirmation = Read-Host "`nRename computer to '$NewComputerName'? (Y/N)"
 
     if ($Confirmation -notmatch '^(Y|YES)$') {
-        Write-Host "Rename cancelled by user. Continuing without changing the name." -ForegroundColor Yellow
-        return $true
+        Write-Host "Rename cancelled by user. No changes made." -ForegroundColor Yellow
+        return $false
     }
 
     # RENAME COMPUTER
@@ -2044,411 +2038,24 @@ function Test-ComputerDeviceNumber {
     }
 }
 
+# RUN VALIDATION
+$DeviceNumberValid = Test-ComputerDeviceNumber -List $List
+
+if (-not $DeviceNumberValid) {
+    Write-Host "`nComputer validation failed or rename was cancelled. Stopping the script." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "`nComputer identity verified. Continuing maintenance..." -ForegroundColor Green
 
 # ------------------------------------------------------------
 # RUN VALIDATION
 # ------------------------------------------------------------
-
 $DeviceNumberValid = Test-ComputerDeviceNumber -List $List
 
-# STOP ONLY IF VALIDATION OR RENAMING FAILED
 if (-not $DeviceNumberValid) {
-    Write-Host "`nComputer validation failed. Stopping the script." -ForegroundColor Red
+    Write-Host "`nComputer validation failed or was cancelled. Stopping the script." -ForegroundColor Red
     exit 1
 }
 
-# ------------------------------------------------------------
-# CONTINUE WITH YOUR MAINTENANCE SCRIPT BELOW THIS LINE
-# ------------------------------------------------------------
-
-Write-Host "`nComputer identity verified. Continuing maintenance..." -ForegroundColor Green
-
-
-
-
-function Start-SystemUpdates {
-
-    $ModuleName = "PSWindowsUpdate"
-
-    try {
-
-        Write-Host ""
-        Write-Host "=============================================" -ForegroundColor Cyan
-        Write-Host "          WINDOWS UPDATE PROCESS" -ForegroundColor Cyan
-        Write-Host "=============================================" -ForegroundColor Cyan
-        Write-Host ""
-
-
-        # ---------------------------------------------------------
-        # 1. Install NuGet
-        # ---------------------------------------------------------
-        Write-Host "[1/4] Checking NuGet provider..." -ForegroundColor Yellow
-
-        Install-PackageProvider `
-            -Name NuGet `
-            -MinimumVersion 2.8.5.201 `
-            -Force `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-
-        # ---------------------------------------------------------
-        # 2. Trust PSGallery
-        # ---------------------------------------------------------
-        Write-Host "[2/4] Checking PowerShell Gallery..." -ForegroundColor Yellow
-
-        if (Get-PSRepository -Name "PSGallery" -ErrorAction SilentlyContinue) {
-
-            Set-PSRepository `
-                -Name "PSGallery" `
-                -InstallationPolicy Trusted `
-                -ErrorAction SilentlyContinue
-        }
-
-
-        # ---------------------------------------------------------
-        # 3. Install PSWindowsUpdate
-        # ---------------------------------------------------------
-        Write-Host "[3/4] Checking PSWindowsUpdate..." -ForegroundColor Yellow
-
-        if (-not (Get-Module -ListAvailable -Name $ModuleName)) {
-
-            Write-Host "Installing PSWindowsUpdate..." -ForegroundColor Cyan
-
-            Install-Module `
-                -Name $ModuleName `
-                -Force `
-                -Confirm:$false `
-                -Scope AllUsers `
-                -AllowClobber `
-                -ErrorAction Stop
-        }
-
-        Import-Module $ModuleName -ErrorAction Stop
-
-
-        # ---------------------------------------------------------
-        # 4. Scan for updates
-        # ---------------------------------------------------------
-        Write-Host "[4/4] Checking Microsoft Update..." -ForegroundColor Yellow
-        Write-Host ""
-
-        $Updates = @(
-            Get-WindowsUpdate `
-                -MicrosoftUpdate `
-                -ErrorAction Stop
-        )
-
-
-        # ---------------------------------------------------------
-        # No updates
-        # ---------------------------------------------------------
-        if ($Updates.Count -eq 0) {
-
-            Write-Host ""
-            Write-Host "No updates are currently available." `
-                -ForegroundColor Green
-
-            Write-Host ""
-
-            return $false
-        }
-
-
-        # ---------------------------------------------------------
-        # Display queued updates
-        # ---------------------------------------------------------
-        Write-Host "=============================================" -ForegroundColor Cyan
-        Write-Host "            UPDATES QUEUED" -ForegroundColor Cyan
-        Write-Host "=============================================" -ForegroundColor Cyan
-        Write-Host ""
-
-        $Number = 1
-
-        foreach ($Update in $Updates) {
-
-            Write-Host "[$Number] $($Update.Title)" `
-                -ForegroundColor White
-
-
-            if ($Update.KB) {
-
-                $KBText = @($Update.KB) -join ", "
-
-                Write-Host "     KB: $KBText" `
-                    -ForegroundColor DarkGray
-            }
-
-
-            # -----------------------------------------------------
-            # Safely handle Size
-            # -----------------------------------------------------
-            if ($null -ne $Update.Size) {
-
-                try {
-
-                    $Sizes = @(
-                        $Update.Size |
-                        ForEach-Object {
-
-                            if ($_ -is [int64] -or
-                                $_ -is [int32] -or
-                                $_ -is [double] -or
-                                $_ -is [decimal]) {
-
-                                [double]$_
-                            }
-                            elseif ($_ -as [double]) {
-
-                                [double]$_
-                            }
-                        }
-                    )
-
-                    if ($Sizes.Count -gt 0) {
-
-                        $TotalSize = ($Sizes | Measure-Object -Sum).Sum
-
-                        if ($TotalSize -gt 0) {
-
-                            $SizeMB = [math]::Round(
-                                ($TotalSize / 1MB),
-                                1
-                            )
-
-                            Write-Host "     Size: $SizeMB MB" `
-                                -ForegroundColor DarkGray
-                        }
-                    }
-                }
-                catch {
-                    # Ignore invalid size information
-                }
-            }
-
-
-            # -----------------------------------------------------
-            # Detect driver
-            # -----------------------------------------------------
-            if ($Update.Driver -eq $true) {
-
-                Write-Host "     Type: DRIVER" `
-                    -ForegroundColor Yellow
-            }
-
-
-            Write-Host ""
-
-            $Number++
-        }
-
-
-        Write-Host "Total updates queued: $($Updates.Count)" `
-            -ForegroundColor Green
-
-        Write-Host ""
-
-
-        # ---------------------------------------------------------
-        # Install updates
-        #
-        # IMPORTANT:
-        # Do NOT install each update individually by KB.
-        # This allows driver updates without KB numbers to work.
-        #
-        # -IgnoreReboot prevents Windows Update from rebooting
-        # before all updates have finished processing.
-        # ---------------------------------------------------------
-        Write-Host "=============================================" `
-            -ForegroundColor Cyan
-
-        Write-Host "          INSTALLING UPDATES" `
-            -ForegroundColor Cyan
-
-        Write-Host "=============================================" `
-            -ForegroundColor Cyan
-
-        Write-Host ""
-
-
-        Write-Progress `
-            -Activity "Installing Windows Updates" `
-            -Status "Starting update installation..." `
-            -PercentComplete 0
-
-
-        Get-WindowsUpdate `
-            -MicrosoftUpdate `
-            -AcceptAll `
-            -Install `
-            -IgnoreReboot `
-            -Verbose `
-            -ErrorAction Stop
-
-
-        Write-Progress `
-            -Activity "Installing Windows Updates" `
-            -Status "Update installation complete" `
-            -PercentComplete 100
-
-
-        Start-Sleep -Seconds 1
-
-
-        Write-Progress `
-            -Activity "Installing Windows Updates" `
-            -Completed
-
-
-        # ---------------------------------------------------------
-        # Check whether Windows requires reboot
-        # ---------------------------------------------------------
-        $RebootRequired = $false
-
-
-        $RebootKeys = @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending",
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-        )
-
-
-        foreach ($Key in $RebootKeys) {
-
-            if (Test-Path $Key) {
-
-                $RebootRequired = $true
-                break
-            }
-        }
-
-
-        # ---------------------------------------------------------
-        # Check Windows Update reboot status if available
-        # ---------------------------------------------------------
-        try {
-
-            $SystemInfo = Get-WURebootStatus -ErrorAction SilentlyContinue
-
-            if ($SystemInfo -and $SystemInfo.RebootRequired) {
-
-                $RebootRequired = $true
-            }
-        }
-        catch {
-            # Registry checks above are sufficient if this command
-            # is unavailable in the installed PSWindowsUpdate version.
-        }
-
-
-        # ---------------------------------------------------------
-        # Update process complete
-        # ---------------------------------------------------------
-        Write-Host ""
-        Write-Host "=============================================" `
-            -ForegroundColor Green
-
-        Write-Host "          UPDATE PROCESS COMPLETE" `
-            -ForegroundColor Green
-
-        Write-Host "=============================================" `
-            -ForegroundColor Green
-
-        Write-Host ""
-
-
-        # ---------------------------------------------------------
-        # Reboot if required
-        # ---------------------------------------------------------
-        if ($RebootRequired) {
-
-            Write-Host "A restart is required to finalize updates." `
-                -ForegroundColor Yellow
-
-            Write-Host ""
-
-            Write-Host "The computer will restart automatically." `
-                -ForegroundColor Yellow
-
-            Write-Host ""
-
-
-            # -----------------------------------------------------
-            # 10-second countdown
-            # -----------------------------------------------------
-            for ($Seconds = 10; $Seconds -gt 0; $Seconds--) {
-
-                Write-Host "`rRestarting in $Seconds seconds... " `
-                    -NoNewline `
-                    -ForegroundColor Yellow
-
-                Start-Sleep -Seconds 1
-            }
-
-
-            Write-Host ""
-            Write-Host ""
-
-            Write-Host "Restarting computer..." `
-                -ForegroundColor Cyan
-
-            Write-Host ""
-
-
-            # -----------------------------------------------------
-            # Restart computer
-            # -----------------------------------------------------
-            Restart-Computer -Force
-
-
-            # This normally will never execute because the system
-            # will restart.
-            return $true
-        }
-
-
-        # ---------------------------------------------------------
-        # No reboot required
-        # ---------------------------------------------------------
-        Write-Host "No restart is currently required." `
-            -ForegroundColor Green
-
-        Write-Host ""
-
-        return $false
-    }
-
-
-    catch {
-
-        Write-Progress `
-            -Activity "Installing Windows Updates" `
-            -Completed
-
-
-        Write-Host ""
-        Write-Host "=============================================" `
-            -ForegroundColor Red
-
-        Write-Host "       WINDOWS UPDATE ENCOUNTERED AN ERROR" `
-            -ForegroundColor Red
-
-        Write-Host "=============================================" `
-            -ForegroundColor Red
-
-        Write-Host ""
-
-        Write-Host $_.Exception.Message `
-            -ForegroundColor Red
-
-        Write-Host ""
-
-        return $false
-    }
-}
-
-Start-SystemUpdates
-
-Start-Sleep -Seconds 10
-
-Restart-Computer -Force
+Read-Host "`nComputer identity verified. Continuing maintenance..." -ForegroundColor Green
