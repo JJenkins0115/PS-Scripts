@@ -1,160 +1,268 @@
-# Repair-DomainTrust.ps1
+#requires -RunAsAdministrator
 
-$ErrorActionPreference = "Continue"
+<#
+.SYNOPSIS
+    Active Directory Domain Trust Diagnostic and Automated Repair Tool.
 
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "       DOMAIN TRUST REPAIR TOOL" -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host ""
+.DESCRIPTION
+    1. Validates domain membership and DC reachability.
+    2. Runs initial health check on secure channel.
+    3. Prompts once for credentials and executes a 4-stage repair escalation:
+       - Test-ComputerSecureChannel -Repair
+       - Reset-ComputerMachinePassword
+       - NLTEST /sc_reset
+       - Domain Unjoin / Rejoin (Fallback)
+    4. Triggers Windows LAPS password rotation upon successful repair.
+#>
 
-$computer = $env:COMPUTERNAME
-$domain = (Get-CimInstance Win32_ComputerSystem).Domain
+$ErrorActionPreference = 'Stop'
 
-Write-Host "Computer : $computer" -ForegroundColor White
-Write-Host "Domain   : $domain" -ForegroundColor White
-Write-Host ""
+# ------------------------------------------------------------
+# Helper Functions
+# ------------------------------------------------------------
 
-if (-not $domain -or $domain -eq $computer) {
-    Write-Host "ERROR: This computer does not appear to be joined to a domain." -ForegroundColor Red
-    Read-Host "`nPress ENTER to close"
-    exit
+function Write-SectionHeader {
+    param([string]$Title)
+    Write-Host ""
+    Write-Host ("=" * 55) -ForegroundColor Cyan
+    Write-Host " $Title" -ForegroundColor Cyan
+    Write-Host ("=" * 55) -ForegroundColor Cyan
+    Write-Host ""
 }
 
-# -------------------------------------------------
-# Test basic network configuration
-# -------------------------------------------------
+function Test-SecureChannelHealth {
+    try {
+        return (Test-ComputerSecureChannel -ErrorAction Stop)
+    }
+    catch {
+        Write-Warning "Secure channel query failed: $($_.Exception.Message)"
+        return $false
+    }
+}
 
-Write-Host "Checking network configuration..." -ForegroundColor Yellow
-ipconfig /all
+function Confirm-RepairStep {
+    param([string]$Method)
+    
+    Write-Host ""
+    Write-Host "Verifying repair step: $Method..." -ForegroundColor Cyan
+    Start-Sleep -Seconds 3
 
+    if (Test-SecureChannelHealth) {
+        Write-Host ""
+        Write-Host "==============================================" -ForegroundColor Green
+        Write-Host " SUCCESS: Secure channel repaired using $Method" -ForegroundColor Green
+        Write-Host "==============================================" -ForegroundColor Green
+        return $true
+    }
+    
+    Write-Host "Secure channel remains unhealthy." -ForegroundColor Yellow
+    return $false
+}
+
+function Invoke-LapsRotation {
+    Write-Host ""
+    Write-Host "Rotating Windows LAPS password..." -ForegroundColor Cyan
+    try {
+        Reset-LapsPassword -ErrorAction Stop
+        Write-Host "LAPS password rotation successfully triggered." -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "LAPS rotation skipped or failed: $($_.Exception.Message)"
+    }
+}
+
+# ------------------------------------------------------------
+# 1. Domain Membership & Network Pre-flight
+# ------------------------------------------------------------
+
+Write-SectionHeader "DOMAIN TRUST DIAGNOSTIC & REPAIR TOOL"
+
+$Computer =$env:COMPUTERNAME
+$Domain =$env:USERDNSDOMAIN
+
+if ([string]::IsNullOrWhiteSpace($Domain)) {
+    try {
+        $Domain = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).Domain
+    }
+    catch {
+        $Domain =$null
+    }
+}
+
+Write-Host "Computer Name : $Computer" -ForegroundColor White
+Write-Host "Active Domain : $Domain" -ForegroundColor White
+
+if ([string]::IsNullOrWhiteSpace($Domain) -or$Domain -eq $Computer -or$Domain -eq "WORKGROUP") {
+    Write-Host ""
+    Write-Error "ERROR: This machine is not joined to an Active Directory domain."
+    exit 1
+}
+
+# Test Domain Controller reachability
 Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "Finding Domain Controller..." -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-
-nltest /dsgetdc:$domain
+Write-Host "Checking Domain Controller reachability..." -ForegroundColor Cyan
+& nltest.exe "/dsgetdc:$Domain" | Out-Null
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""
-    Write-Host "ERROR: Could not locate a Domain Controller." -ForegroundColor Red
+    Write-Host "ERROR: Could not locate a Domain Controller for $Domain." -ForegroundColor Red
     Write-Host ""
     Write-Host "Possible causes:" -ForegroundColor Yellow
-    Write-Host "  - DNS is pointing to the wrong server"
-    Write-Host "  - Network connection is unavailable"
-    Write-Host "  - Domain Controller is unreachable"
-    Write-Host "  - VPN is required"
-    Write-Host "  - This is Safe Mode without Networking"
+    Write-Host "  - DNS pointing to improper DNS server"
+    Write-Host "  - Network interface offline or disconnected"
+    Write-Host "  - Domain Controller unreachable / VPN required"
     Write-Host ""
-    Write-Host "Current DNS configuration:" -ForegroundColor Cyan
-    Get-DnsClientServerAddress -AddressFamily IPv4
-    Write-Host ""
-
-    Read-Host "Press ENTER to close"
-    exit
+    Write-Host "Current DNS IPv4 Configuration:" -ForegroundColor Cyan
+    Get-DnsClientServerAddress -AddressFamily IPv4 | Where-Object { $_.ServerAddresses } | Select-Object InterfaceAlias, ServerAddresses | Format-Table -AutoSize
+    exit 1
 }
 
-Write-Host ""
-Write-Host "Domain Controller found!" -ForegroundColor Green
+Write-Host "Domain Controller located successfully." -ForegroundColor Green
 
-# -------------------------------------------------
-# Test secure channel
-# -------------------------------------------------
-
-Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "Testing Secure Channel..." -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
-
-$secureChannel = Test-ComputerSecureChannel -Verbose
-
-if ($secureChannel) {
-    Write-Host ""
-    Write-Host "SUCCESS: Secure channel is already healthy." -ForegroundColor Green
-    Write-Host ""
-    Read-Host "Press ENTER to close"
-    exit
-}
+# ------------------------------------------------------------
+# 2. Initial Health Check
+# ------------------------------------------------------------
 
 Write-Host ""
-Write-Host "Secure channel is BROKEN." -ForegroundColor Red
-Write-Host ""
-Write-Host "Attempting repair..." -ForegroundColor Yellow
-
-# -------------------------------------------------
-# Repair
-# -------------------------------------------------
-
-$credential = Get-Credential -Message "Enter DOMAIN credentials authorized to repair this computer"
-
-if (-not $credential) {
-    Write-Host ""
-    Write-Host "No credentials supplied. Repair cancelled." -ForegroundColor Red
-    Read-Host "Press ENTER to close"
-    exit
-}
-
-$result = Test-ComputerSecureChannel `
-    -Repair `
-    -Credential $credential `
-    -Verbose
-
-Write-Host ""
-
-if ($result) {
-    Write-Host "==========================================" -ForegroundColor Green
-    Write-Host "       DOMAIN TRUST REPAIRED" -ForegroundColor Green
-    Write-Host "==========================================" -ForegroundColor Green
-    Write-Host ""
+Write-Host "Checking secure channel status..." -ForegroundColor Cyan
+if (Test-SecureChannelHealth) {
+    Write-Host "Secure channel is HEALTHY. No repair necessary." -ForegroundColor Green
     
-    Write-Host "Verifying repair..." -ForegroundColor Yellow
-
-    $verify = Test-ComputerSecureChannel -Verbose
-
-    if ($verify) {
-        Write-Host ""
-        Write-Host "SUCCESS: Secure channel verified." -ForegroundColor Green
-        Write-Host ""
-        Write-Host "A restart is recommended." -ForegroundColor Yellow
-        Write-Host ""
-        $restart = Read-Host "Restart now? (Y/N)"
-
-        if ($restart -eq "Y" -or $restart -eq "y") {
-            Restart-Computer
-        }
+    $RotateLaps = Read-Host "`nWould you like to trigger a LAPS password reset anyway? (Y/N)"
+    if ($RotateLaps -match '^[Yy]$') {
+        Invoke-LapsRotation
     }
-    else {
-        Write-Host ""
-        Write-Host "WARNING: Repair reported success, but verification failed." -ForegroundColor Yellow
-    }
+    exit 0
 }
-else {
-    Write-Host "==========================================" -ForegroundColor Red
-    Write-Host "       DOMAIN TRUST REPAIR FAILED" -ForegroundColor Red
-    Write-Host "==========================================" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "The computer account could not be repaired." -ForegroundColor Red
-}
-# -------------------------------------------------
-# Reset Windows LAPS password
-# -------------------------------------------------
+
+Write-Host "Secure channel is BROKEN." -ForegroundColor Yellow
+
+# ------------------------------------------------------------
+# 3. Obtain Credentials
+# ------------------------------------------------------------
 
 Write-Host ""
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "Resetting Windows LAPS password..." -ForegroundColor Cyan
-Write-Host "==========================================" -ForegroundColor Cyan
+$Cred = Get-Credential -Message "Enter credentials with AD permissions to repair this computer account"
+
+if (-not $Cred) {
+    Write-Error "No credentials supplied. Aborting repair."
+    exit 1
+}
+
+# ------------------------------------------------------------
+# 4. Repair Escalation Sequence
+# ------------------------------------------------------------
+
+# --- METHOD 1: Test-ComputerSecureChannel -Repair ---
+Write-Host ""
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+Write-Host "METHOD 1: Test-ComputerSecureChannel -Repair" -ForegroundColor Cyan
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
 
 try {
-    Reset-LapsPassword -ErrorAction Stop
-
-    Write-Host ""
-    Write-Host "SUCCESS: LAPS password rotation was triggered." -ForegroundColor Green
-    Write-Host "The new password should be available through your organization's LAPS management system."
+    Test-ComputerSecureChannel -Repair -Credential $Cred -ErrorAction Stop | Out-Null
+    if (Confirm-RepairStep "Test-ComputerSecureChannel -Repair") {
+        Invoke-LapsRotation
+        $Restart = Read-Host "`nRestart computer now? (Y/N)"
+        if ($Restart -match '^[Yy]$') { Restart-Computer -Force }
+        exit 0
+    }
 }
 catch {
-    Write-Host ""
-    Write-Host "ERROR: LAPS password reset failed." -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Warning "Method 1 failed: $($_.Exception.Message)"
 }
 
+# --- METHOD 2: Reset-ComputerMachinePassword ---
 Write-Host ""
-Read-Host "Press ENTER to close"
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+Write-Host "METHOD 2: Reset-ComputerMachinePassword" -ForegroundColor Cyan
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+
+try {
+    Reset-ComputerMachinePassword -Credential $Cred -ErrorAction Stop | Out-Null
+    if (Confirm-RepairStep "Reset-ComputerMachinePassword") {
+        Invoke-LapsRotation
+        $Restart = Read-Host "`nRestart computer now? (Y/N)"
+        if ($Restart -match '^[Yy]$') { Restart-Computer -Force }
+        exit 0
+    }
+}
+catch {
+    Write-Warning "Method 2 failed: $($_.Exception.Message)"
+}
+
+# --- METHOD 3: NLTEST /sc_reset ---
+Write-Host ""
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+Write-Host "METHOD 3: NLTEST /sc_reset" -ForegroundColor Cyan
+Write-Host "----------------------------------------------" -ForegroundColor DarkGray
+
+try {
+    & nltest.exe "/sc_reset:$Domain" | Out-Null
+    if ($LASTEXITCODE -eq 0 -and (Confirm-RepairStep "NLTEST /sc_reset")) {
+        Invoke-LapsRotation
+        $Restart = Read-Host "`nRestart computer now? (Y/N)"
+        if ($Restart -match '^[Yy]$') { Restart-Computer -Force }
+        exit 0
+    }
+}
+catch {
+    Write-Warning "Method 3 failed: $($_.Exception.Message)"
+}
+
+# ------------------------------------------------------------
+# 5. Method 4: Domain Removal & Rejoin (Fallback)
+# ------------------------------------------------------------
+
+Write-Host ""
+Write-Host "==============================================" -ForegroundColor Yellow
+Write-Host " Automatic secure-channel repair methods failed." -ForegroundColor Yellow
+Write-Host "==============================================" -ForegroundColor Yellow
+
+$Choice = Read-Host "`nAttempt domain removal and rejoin? (Y/N)"
+
+if ($Choice -notmatch '^[Yy]$') {
+    Write-Host "No changes were made." -ForegroundColor Yellow
+    exit 1
+}
+
+$Confirm = Read-Host "Type REJOIN to unjoin and rejoin domain '$Domain'"
+
+if ($Confirm -ne 'REJOIN') {
+    Write-Host "Domain rejoin cancelled." -ForegroundColor Yellow
+    exit 1
+}
+
+# Remove Domain
+Write-Host ""
+Write-Host "Removing computer from $Domain..." -ForegroundColor Cyan
+try {
+    Remove-Computer -UnjoinDomainCredential $Cred -Force -ErrorAction Stop
+    Write-Host "Computer unjoined successfully." -ForegroundColor Green
+}
+catch {
+    Write-Error "Domain removal failed: $($_.Exception.Message)"
+    exit 1
+}
+
+# Rejoin Domain
+Write-Host ""
+Write-Host "Rejoining computer to $Domain..." -ForegroundColor Cyan
+try {
+    Add-Computer -DomainName $Domain -Credential $Cred -Force -ErrorAction Stop
+    Write-Host "Computer successfully rejoined to $Domain." -ForegroundColor Green
+    
+    Invoke-LapsRotation
+
+    $Restart = Read-Host "`nA restart is required to complete rejoin. Restart now? (Y/N)"
+    if ($Restart -match '^[Yy]$') {
+        Restart-Computer -Force
+    }
+    else {
+        Write-Host "Please restart the computer manually." -ForegroundColor Yellow
+    }
+}
+catch {
+    Write-Error "Domain rejoin failed: $($_.Exception.Message)"
+    exit 1
+}
